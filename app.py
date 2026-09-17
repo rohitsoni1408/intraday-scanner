@@ -148,7 +148,7 @@ def load_nifty_500_symbols():
             "NTPC",
             "POWERGRID",
             "ASIANPAINT",
-            "ULTRACEMCO",,
+            "ULTRACEMCO",
         ]
 
 
