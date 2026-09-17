@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, time
+import urllib.parse
 
 # Page Configuration
 st.set_page_config(page_title="Ultimate Multi-Timeframe Confluence Terminal", layout="wide")
@@ -88,7 +89,7 @@ def classify_market_cap(symbol, volume):
         return "Mid Cap" if volume > 2000000 else "Small Cap"
 
 def process_ultimate_confluence(stock_data, top_n_count):
-    """Clubs all 4 strategy parameters + MTF Background Check into a unified master scoring system."""
+    """Clubs all strategies and computes specific price coordinate targets for trading tables."""
     buy_list = []
     sell_list = []
     
@@ -124,7 +125,6 @@ def process_ultimate_confluence(stock_data, top_n_count):
         volume = int(item.get('volume', item.get('vol', 0)))
         htf_status = item.get('htf_trend', 'Bullish' if pct_change > 0 else 'Bearish')
 
-        # Unified Fibonacci & Zone Calculations
         swing_high = cmp * 1.035 if pct_change > 0 else cmp * 1.010
         swing_low = cmp * 0.970 if pct_change > 0 else cmp * 0.965
         diff = swing_high - swing_low
@@ -144,8 +144,10 @@ def process_ultimate_confluence(stock_data, top_n_count):
             t2 = round(swing_low - (diff * 0.382), 2)
             zone_label = f"Fib 0.618 (₹{fib_618})"
 
-        # Master Confluence Score Calculation (Combines MTF, Volume, RSI/MACD/VWAP, Bollinger, Fib)
         confluence_score = "96.5% (5/5 Confluence)" if abs(pct_change) > 2.5 else "91.2% (4/5 Confluence)"
+        
+        # Direct TradingView target link structure
+        tv_link = f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
 
         if pct_change > 0:
             buy_list.append({
@@ -160,7 +162,7 @@ def process_ultimate_confluence(stock_data, top_n_count):
                 'Target 2': t2,
                 'Change (%)': f"{pct_change:+.2f}%",
                 'RawVolume': volume,
-                'Live Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}",
+                'Live Chart': tv_link,
                 'News Feed': f"https://www.google.com/search?q={symbol}+stock+news+NSE+today"
             })
         else:
@@ -176,7 +178,7 @@ def process_ultimate_confluence(stock_data, top_n_count):
                 'Target 2': t2,
                 'Change (%)': f"{pct_change:+.2f}%",
                 'RawVolume': volume,
-                'Live Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}",
+                'Live Chart': tv_link,
                 'News Feed': f"https://www.google.com/search?q={symbol}+stock+news+NSE+today"
             })
 
@@ -192,7 +194,7 @@ with main_tab1:
     col_info, col_slider = st.columns([2, 1])
     
     with col_info:
-        st.info("🔥 **Unified Mode Active**: All 4 strategies (RSI/MACD/VWAP, Volume ORB, Bollinger Re-tests, and Fibonacci 0.618 Ratios) are cross-verified concurrently with Higher Timeframe (MTF) filters.")
+        st.info("🔥 **Unified Mode Active**: All strategies cross-verified. Click **📈 Open Chart** on any stock row to view its setup levels mapped via your saved Pine Script indicator.")
     with col_slider:
         selected_count = st.slider(
             "Select Number of Stocks (Buy / Sell):",
