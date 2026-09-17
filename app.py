@@ -60,11 +60,11 @@ if not st.session_state.authenticated:
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 500 Universe)")
 st.markdown(
     "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen"
-    " Symbol Column**, **Intraday RSI Divergence**, and **Advanced Higher Timeframe (Weekly/Monthly) Supply-Demand MTF Strategy**."
+    " Symbol Column**, **Intraday RSI Divergence**, **Exceptional Volume Filter**, and **Advanced Higher Timeframe (Weekly/Monthly) Supply-Demand MTF Strategy**."
 )
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
-    "⚡ Intraday Engine (Tight SL + 5m RSI Divergence)",
+    "⚡ Intraday Engine (Tight SL + 5m RSI Div + Exceptional Volume)",
     "📊 Precision Intraday Backtester Engine",
     "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Multi-Indicator Confluence)",
 ])
@@ -149,9 +149,7 @@ def compute_supertrend(df, period=10, multiplier=3):
     upper_band = hl2 + (multiplier * atr)
     lower_band = hl2 - (multiplier * atr)
     
-    supertrend = pd.Series(0.0, index=df.index)
     trend = pd.Series(1, index=df.index)
-    
     for i in range(1, len(df)):
         if df["Close"].iloc[i] > upper_band.iloc[i-1]:
             trend.iloc[i] = 1
@@ -227,6 +225,12 @@ def fetch_live_market_data(symbols):
                 else cmp
             )
 
+            # --- EXCEPTIONAL VOLUME CHECK (Intraday Volume Spike) ---
+            vol_ma = df_intraday["Volume"].rolling(window=20).mean()
+            curr_candle_vol = float(df_intraday["Volume"].iloc[-1])
+            avg_vol_ma = float(vol_ma.iloc[-1]) if not vol_ma.empty and not pd.isna(vol_ma.iloc[-1]) else 0.0
+            exceptional_vol = curr_candle_vol > (avg_vol_ma * 1.5) if avg_vol_ma > 0 else False
+
             rsi_5m = compute_rsi(df_intraday["Close"], period=14)
             curr_rsi = float(rsi_5m.iloc[-1])
             prev_rsi = float(rsi_5m.iloc[-6])
@@ -248,6 +252,7 @@ def fetch_live_market_data(symbols):
                 "day_high": day_high,
                 "day_low": day_low,
                 "vwap": vwap,
+                "exceptional_vol": exceptional_vol,
                 "rsi_bull_div": intra_bull_div,
                 "rsi_bear_div": intra_bear_div,
             }
@@ -342,6 +347,7 @@ def process_ultimate_confluence(
             live_info["day_low"],
             live_info["vwap"],
         )
+        exceptional_vol = live_info["exceptional_vol"]
         rsi_bull_div, rsi_bear_div = (
             live_info["rsi_bull_div"],
             live_info["rsi_bear_div"],
@@ -384,6 +390,8 @@ def process_ultimate_confluence(
 
         if 1.0 <= abs(pct_change) <= 3.5:
             green_reasons.append("Healthy Momentum")
+        if exceptional_vol:
+            green_reasons.append("🔥 Exceptional Volume Spike")
         if rsi_bull_div and pct_change >= 0:
             green_reasons.append("5m RSI Bullish Divergence")
         if rsi_bear_div and pct_change < 0:
@@ -449,7 +457,7 @@ def process_ultimate_confluence(
     return df_buy, df_sell
 
 
-# --- ADVANCED WEEKLY MTF ENGINE (NIFTY 500 - HIGHER TIMEFRAME SUPPLY & DEMAND + CONFLUENCE) ---
+# --- ADVANCED WEEKLY MTF ENGINE (NIFTY 500) ---
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols, top_n_count):
     results = []
@@ -728,7 +736,7 @@ st.markdown("---")
 
 # --- TAB 1: INTRADAY ENGINE ---
 with main_tab1:
-    st.subheader("⚡ Intraday Engine (Tight SL + 5m RSI Divergence)")
+    st.subheader("⚡ Intraday Engine (Tight SL + 5m RSI Div + Exceptional Volume)")
     post_market_toggle = st.checkbox(
         "Force Post-Market Next-Session Calculation Mode",
         value=is_market_closed(),
