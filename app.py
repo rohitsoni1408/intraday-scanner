@@ -59,7 +59,7 @@ if not st.session_state.authenticated:
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 500 Universe)")
 st.markdown(
-    "Trading Terminal featuring **Direct TradingView Chart Links**, **Intraday RSI Divergence**, **Weekly Volume Profile & VWAP Confluence**, and **Dynamic Signal Formatting**."
+    "Trading Terminal featuring **Frozen Symbol Column**, **Direct TradingView Chart Links**, **Intraday RSI Divergence**, and **Dynamic Signal Formatting**."
 )
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
@@ -252,7 +252,7 @@ def fetch_chartink_stocks(scan_condition):
 
 
 def render_native_table(df, key_prefix):
-    """Renders a native interactive table with header-click sorting and direct link columns."""
+    """Renders a native interactive table with a frozen Symbol column, sorting, and direct link columns."""
     if df.empty:
         st.info("No stocks found matching the current criteria.")
         return
@@ -265,9 +265,10 @@ def render_native_table(df, key_prefix):
     st.dataframe(
         df_to_show,
         column_config={
+            "Symbol": st.column_config.TextColumn("Symbol", pinned=True),
             "Chart": st.column_config.LinkColumn(
                 "Chart", display_text="📈 Open Chart"
-            )
+            ),
         },
         hide_index=True,
         use_container_width=True,
