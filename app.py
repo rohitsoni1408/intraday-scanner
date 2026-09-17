@@ -7,8 +7,26 @@ import random
 # Page Configuration
 st.set_page_config(page_title="Intraday Pro Terminal", layout="wide")
 
+# --- PASSCODE AUTHENTICATION ---
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 Security Lock - Intraday Terminal")
+    st.markdown("Please enter your security passcode to unlock the professional terminal.")
+    
+    passcode_input = st.text_input("Enter Passcode:", type="password")
+    if st.button("🔓 Unlock Terminal", type="primary"):
+        if passcode_input == "Ginni":
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect passcode. Access denied.")
+    st.stop() # Stops execution here until unlocked
+
+# --- MAIN APP (Unlocked) ---
 st.title("🚀 NSE Intraday Pro Terminal & Elite Picker")
-st.markdown("Scan all market opportunities instantly or click for automated top-tier recommendations with text color-coding.")
+st.markdown("Authorized access granted. Scan live institutional setups, check supply/demand zones, and review strategy logic.")
 
 # Navigation Tabs
 tab1, tab2 = st.tabs(["⚡ Full Scanner & Instant Top Picks", "📊 Strategy Backtester"])
@@ -67,7 +85,7 @@ def process_all_targets(stock_data):
             'Symbol': symbol,
             'Signal': signal_type,
             'Live Price (₹)': cmp,
-            'Change (%)': pct_change, # Stored as float for clean color formatting
+            'Change (%)': f"{pct_change:+.2f}%",
             'Volume Spike': f"+{vol_spike_pct}%",
             'Demand Zone': demand_zone,
             'Supply Zone': supply_zone,
@@ -80,20 +98,30 @@ def process_all_targets(stock_data):
 
     return pd.DataFrame(processed_list)
 
-# Function to color specific text columns (Symbol & Change %)
-def color_text_cells(val):
-    if isinstance(val, (int, float)):
-        color = 'green' if val >= 0 else 'red'
-        return f'color: {color}; font-weight: bold;'
-    return ''
-
-def color_symbols(val):
-    return 'color: #008000; font-weight: bold;' if val == 'BUY' else 'color: #D32F2F; font-weight: bold;'
-
-# --- TAB 1: SCANNER & INSTANT TOP PICKS ---
+# --- TAB 1: SCANNER & LOGIC EXPLANATION ---
 with tab1:
     st.subheader("Live NSE Momentum Scanner")
-    st.markdown("Run the full market scan, or use the **One-Click Top Picks** button to instantly generate your top 5 high-conviction trades.")
+    
+    # Logic & Results Breakdown Expander
+    with st.expander("📖 View Scan Logic, Rules & Result Breakdown"):
+        st.markdown("""
+        ### 🔍 How the Scan Engine Runs:
+        1. **Data Handshake**: The app sends automated requests to live market screening endpoints using secure tokens (`CSRF`) behind the scenes.
+        2. **Core Strategy Rules (Evaluated on 15-Minute Timeframe)**:
+           - **Price vs VWAP (`15-min Close > 15-min VWAP`)**: Filters for strong institutional buying momentum where price stays above average volume-weighted prices.
+           - **RSI Momentum (`14-period RSI > 60`)**: Ensures buyers control the velocity, filtering out sideways or weak trends.
+           - **Liquidity Filter (`Volume > 100,000`)**: Eliminates low-volume stocks to prevent slippage during execution.
+        
+        ### 📊 What Results Are Provided:
+        - **Signal & Direction**: Identifies active market direction (BUY/SELL).
+        - **Volume Spike (%)**: Highlights relative volume surges compared to benchmark averages.
+        - **Demand & Supply Zones**: Pre-computed support (demand) and resistance (supply) boundaries for exact entries and exits.
+        - **Risk Matrix**: Automated Stop-Loss (SL) and Target calculations.
+        - **Action Links**: Direct one-click access to **TradingView Charts** and **Google News Feeds**.
+        """)
+
+    st.markdown("---")
+    st.markdown("Run a full market scan or use the **One-Click Top Picks** button to isolate high-conviction trades.")
     
     chartink_clause = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute rsi( 14 ) > 60 and [0] 15 minute volume > 100000 ) )"
 
@@ -104,31 +132,25 @@ with tab1:
         run_top_picks = st.button("🔥 One-Click Top 5 Best Trades", type="secondary")
 
     if run_full_scan or run_top_picks:
-        with st.spinner("Fetching market feeds and evaluating indicators..."):
+        with st.spinner("Executing live market scan and evaluating technical matrices..."):
             raw_stocks = fetch_chartink_stocks(chartink_clause)
             df_results = process_all_targets(raw_stocks)
             
             if not df_results.empty:
                 if run_top_picks:
-                    # Automatically sort by highest volume/liquidity and slice top 5
                     df_results = df_results.sort_values(by='RawVolume', ascending=False).head(5)
-                    st.success(id if 'id' in locals() else f"Successfully isolated the Top 5 elite high-probability trades!")
+                    st.success("Successfully isolated the Top 5 elite high-probability trades!")
                 else:
                     st.success(f"Scan complete! Found {len(df_results)} matching stocks.")
                 
-                # Format Change (%) back to string representation with % sign for display
-                df_results['Change (%)'] = df_results['Change (%)'].apply(lambda x: f"{x:+.2f}%")
                 df_results = df_results.drop(columns=['RawVolume'])
-                
                 st.session_state['df_results'] = df_results
             else:
                 st.warning("No stocks match the strategy criteria right now.")
                 st.session_state['df_results'] = pd.DataFrame()
 
-    # Display results if available in session state
     if 'df_results' in st.session_state and not st.session_state['df_results'].empty:
         df = st.session_state['df_results']
-        
         table_title = "🔥 Instant Top 5 Curated Execution Sheet" if run_top_picks else "📋 All Matching Stocks"
         st.markdown(f"### {table_title}")
         
