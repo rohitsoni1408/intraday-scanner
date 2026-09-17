@@ -59,7 +59,9 @@ if not st.session_state.authenticated:
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 500 Universe)")
 st.markdown(
-    "Trading Terminal featuring **Frozen Symbol Column**, **Direct TradingView Chart Links**, **Intraday RSI Divergence**, and **Dynamic Signal Formatting**."
+    "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen"
+    " Symbol Column**, **Intraday RSI Divergence**, and **Dynamic Signal"
+    " Formatting**."
 )
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
@@ -356,7 +358,7 @@ def process_ultimate_confluence(
         if rsi_bear_div and pct_change < 0:
             green_reasons.append("5m RSI Bearish Divergence")
 
-        chart_link = f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
+        chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
 
         if pct_change >= 0:
             status_tag = f"BUY ({', '.join(green_reasons) if green_reasons else 'STRONG MOMENTUM'})"
@@ -496,7 +498,9 @@ def fetch_weekly_mtf_strategy(symbols):
                 or (cmp <= vol_poc * 1.03)
                 or (cmp >= weekly_vwap * 0.98 and cmp <= weekly_vwap * 1.05)
             )
-            chart_link = f"https://in.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+            chart_link = (
+                f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+            )
 
             if (bullish_rsi_div or macd_bullish_cross) and is_near_demand:
                 is_buy = True
@@ -589,7 +593,9 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
 
             is_buy = close_price >= open_price
             entry_price = open_price
-            chart_link = f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
+            chart_link = (
+                f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
+            )
 
             if is_buy:
                 sl, t1, t2 = (
