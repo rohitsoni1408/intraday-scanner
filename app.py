@@ -60,14 +60,13 @@ if not st.session_state.authenticated:
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 500 Universe)")
 st.markdown(
     "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen"
-    " Symbol Column**, **Intraday RSI Divergence**, and **Dynamic Signal"
-    " Formatting**."
+    " Symbol Column**, **Intraday RSI Divergence**, and **Optimized 1:3+ RR Weekly MTF Strategy**."
 )
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
     "⚡ Intraday Engine (Tight SL + 5m RSI Divergence)",
     "📊 Precision Intraday Backtester Engine",
-    "🗓️ Weekly MTF Strategy (Volume Profile + VWAP + RSI Div - Long Only, 1:3 RR)",
+    "🗓️ Weekly MTF Strategy (Volume Profile + VWAP + RSI Div - Tight SL, Min 1:3 RR)",
 ])
 
 
@@ -418,7 +417,7 @@ def process_ultimate_confluence(
     return df_buy, df_sell
 
 
-# --- ENHANCED WEEKLY MTF ENGINE (NIFTY 500 TARGETED - LONG ONLY, 1:3 RR) ---
+# --- OPTIMIZED WEEKLY MTF ENGINE (NIFTY 500 - LONG ONLY, TIGHT SL & MIN 1:3 RR) ---
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols):
     results = []
@@ -493,16 +492,24 @@ def fetch_weekly_mtf_strategy(symbols):
             )
 
             if (bullish_rsi_div or macd_bullish_cross) and is_near_demand:
-                setup_type = "STRONG BUY (Demand + Vol POC + RSI Div)"
+                setup_type = "STRONG BUY (Optimized Tight SL + Min 1:3 RR)"
                 entry = cmp
-                sl = round(min(best_demand_zone, vol_poc) * 0.985, 2)
                 
-                # Enforce minimum Risk:Reward Ratio of 1:3
+                # Optimized Tight Stop Loss calculation (below recent weekly candle low with a max 3.5% risk cap to avoid far SL)
+                recent_weekly_low = float(df_weekly["Low"].iloc[-1])
+                calculated_sl = round(recent_weekly_low * 0.99, 2)
+                max_allowed_sl = round(entry * 0.965, 2)
+                sl = max(calculated_sl, max_allowed_sl)
+                if sl >= entry:
+                    sl = round(entry * 0.97, 2)
+
                 risk = entry - sl
                 if risk <= 0:
                     continue
+                
+                # Enforce strict Minimum 1:3 Risk:Reward Ratio
                 t1 = round(entry + (risk * 1.5), 2)
-                t2 = round(entry + (risk * 3.0), 2)
+                t2 = round(max(best_supply_zone, entry + (risk * 3.2)), 2)
             else:
                 continue
 
@@ -778,15 +785,15 @@ with main_tab2:
     else:
         st.info("Select a date and click the button above to run backtesting.")
 
-# --- TAB 3: WEEKLY MTF ENGINE (NIFTY 500 - LONG ONLY, 1:3 RR) ---
+# --- TAB 3: WEEKLY MTF ENGINE (NIFTY 500 - LONG ONLY, TIGHT SL & MIN 1:3 RR) ---
 with main_tab3:
     st.subheader(
-        "🗓️ Weekly MTF Strategy (Volume Profile POC + VWAP + RSI Div - Long Only)"
+        "🗓️ Weekly MTF Strategy (Volume Profile POC + VWAP + RSI Div - Tight SL, Min 1:3 RR)"
     )
     st.markdown(
         "Multi-timeframe scanner combining **Volume Profile Point of Control"
         " (POC)**, **Weekly VWAP**, **Demand Zones**, and **RSI Divergence**"
-        " across **Top 500 Nifty stocks** restricted to **Long Setups with a Minimum 1:3 Risk:Reward Ratio**."
+        " across **Top 500 Nifty stocks** restricted to **Long Setups with Optimized Tight Stop Losses and a Minimum 1:3 Risk:Reward Ratio**."
     )
 
     if st.button(
