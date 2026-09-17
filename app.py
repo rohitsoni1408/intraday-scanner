@@ -25,11 +25,11 @@ if not st.session_state.authenticated:
     st.stop()
 
 # --- MAIN APP (Unlocked) ---
-st.title("🚀 NSE Intraday Pro Terminal & Market Cap Categorizer")
-st.markdown("Authorized access granted. Scans market opportunities and automatically categorizes stocks into Large Cap, Mid Cap, and Small Cap.")
+st.title("🚀 NSE Intraday Pro Terminal & Risk Matrix")
+st.markdown("Authorized access granted. Features precise Entry, Stop-Loss, and Target breakdowns alongside Market Cap categorization.")
 
 # Navigation Tabs
-tab1, tab2 = st.tabs(["⚡ Full Scanner & Categorizer", "📊 Strategy Backtester"])
+tab1, tab2 = st.tabs(["⚡ Full Scanner & Risk Matrix", "📊 Strategy Backtester"])
 
 def fetch_chartink_stocks(scan_condition):
     url = "https://chartink.com/screener/process"
@@ -60,7 +60,6 @@ def fetch_chartink_stocks(scan_condition):
     return []
 
 def classify_market_cap(symbol, volume):
-    # Simulated logical mapping based on institutional liquidity & known NSE profiles
     large_caps = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HINDUNILVR"]
     mid_caps = ["TATASTEEL", "NTPC", "POWERGRID", "AXISBANK", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TITAN", "ASIANPAINT"]
     
@@ -69,7 +68,6 @@ def classify_market_cap(symbol, volume):
     elif symbol in mid_caps:
         return "Mid Cap"
     else:
-        # Fallback distribution logic for remainder scanned volume results
         return "Small Cap" if volume < 500000 else ("Mid Cap" if volume < 2000000 else "Large Cap")
 
 def process_all_targets(stock_data):
@@ -85,12 +83,20 @@ def process_all_targets(stock_data):
 
         signal_type = "BUY" if pct_change >= 0 else "SELL"
         vol_spike_pct = round(random.uniform(150.0, 400.0), 1)
-        sl = round(cmp * (0.99 if signal_type == "BUY" else 1.01), 2)         
-        target = round(cmp * (1.025 if signal_type == "BUY" else 0.975), 2)  
         
-        # Determine Market Cap Category
-        mcap_category = classify_market_cap(symbol, volume)
+        # Risk Matrix calculations: Entry (CMP), Stop Loss, and Progressive Targets
+        if signal_type == "BUY":
+            sl = round(cmp * 0.99, 2)         # 1% Below Entry
+            t1 = round(cmp * 1.015, 2)        # 1.5% Target
+            t2 = round(cmp * 1.025, 2)        # 2.5% Target
+            t3 = round(cmp * 1.035, 2)        # 3.5% Target
+        else:
+            sl = round(cmp * 1.01, 2)         # 1% Above Entry (Short)
+            t1 = round(cmp * 0.985, 2)        # 1.5% Target Down
+            t2 = round(cmp * 0.975, 2)        # 2.5% Target Down
+            t3 = round(cmp * 0.965, 2)        # 3.5% Target Down
 
+        mcap_category = classify_market_cap(symbol, volume)
         demand_zone = f"₹{round(cmp * 0.975, 2)} - ₹{round(cmp * 0.985, 2)}"
         supply_zone = f"₹{round(cmp * 1.03, 2)} - ₹{round(cmp * 1.04, 2)}"
         
@@ -101,13 +107,15 @@ def process_all_targets(stock_data):
             'Symbol': symbol,
             'Category': mcap_category,
             'Signal': signal_type,
-            'Live Price (₹)': cmp,
+            'Best Entry (₹)': cmp,
+            'Stop Loss (SL)': sl,
+            'Target 1 (1.5%)': t1,
+            'Target 2 (2.5%)': t2,
+            'Target 3 (3.5%)': t3,
             'Change (%)': f"{pct_change:+.2f}%",
             'Volume Spike': f"+{vol_spike_pct}%",
             'Demand Zone': demand_zone,
             'Supply Zone': supply_zone,
-            'Stop Loss': sl,
-            'Target': target,
             'RawVolume': volume,
             'Live Chart': tv_link,
             'News Feed': news_link
@@ -115,16 +123,16 @@ def process_all_targets(stock_data):
 
     return pd.DataFrame(processed_list)
 
-# --- TAB 1: SCANNER & CATEGORIZER ---
+# --- TAB 1: SCANNER & RISK MATRIX ---
 with tab1:
-    st.subheader("Live NSE Momentum Scanner & Categorizer")
+    st.subheader("Live NSE Momentum Scanner & Execution Matrix")
     
-    with st.expander("📖 View Scan Logic & Categories Breakdown"):
+    with st.expander("📖 View Strategy Rules & Execution Guide"):
         st.markdown("""
-        ### 🏷️ Market Cap Classification Rules:
-        - **Large Cap**: Heavy-weight market leaders with supreme institutional liquidity (e.g., Reliance, TCS, HDFC Bank).
-        - **Mid Cap**: Stable mid-tier companies showing strong breakout expansion and reliable momentum velocity.
-        - **Small Cap**: High-beta, explosive movement growth stocks filtered out from high volume surges.
+        ### 📐 Execution Order Matrix:
+        1. **Best Entry Price**: Evaluated at the Live Market Price (CMP) upon breakout confirmation.
+        2. **Stop-Loss (SL)**: Fixed risk boundary placed strictly at 1% away from the entry price to protect capital.
+        3. **Targets (T1, T2, T3)**: Progressive reward milestones set at +1.5%, +2.5%, and +3.5% extensions respectively.
         """)
 
     st.markdown("---")
@@ -138,7 +146,7 @@ with tab1:
     chartink_clause = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute rsi( 14 ) > 60 and [0] 15 minute volume > 100000 ) )"
 
     if run_full_scan or run_top_picks:
-        with st.spinner("Executing live market scan and classifying market caps..."):
+        with st.spinner("Calculating precision entry, stop-loss, and target matrices..."):
             raw_stocks = fetch_chartink_stocks(chartink_clause)
             df_results = process_all_targets(raw_stocks)
             
@@ -147,7 +155,7 @@ with tab1:
                     df_results = df_results.sort_values(by='RawVolume', ascending=False).head(5)
                     st.success("Successfully isolated the Top 5 elite high-probability trades!")
                 else:
-                    st.success(f"Scan complete! Categorized {len(df_results)} matching stocks.")
+                    st.success(f"Scan complete! Analyzed {len(df_results)} matching stocks.")
                 
                 df_results = df_results.drop(columns=['RawVolume'])
                 st.session_state['df_results'] = df_results
@@ -155,12 +163,10 @@ with tab1:
                 st.warning("No stocks match the strategy criteria right now.")
                 st.session_state['df_results'] = pd.DataFrame()
 
-    # Filtering and display controls if results exist
     if 'df_results' in st.session_state and not st.session_state['df_results'].empty:
         df = st.session_state['df_results']
         
         st.markdown("---")
-        # Category Filter Filter Box
         selected_category = st.selectbox(
             "🔍 Filter by Market Cap Category:",
             options=["All Categories", "Large Cap", "Mid Cap", "Small Cap"]
@@ -171,8 +177,7 @@ with tab1:
         else:
             df_filtered = df
 
-        table_title = f"📋 Matching Stocks ({selected_category})"
-        st.markdown(f"### {table_title}")
+        st.markdown(f"### 📋 Execution Sheet ({selected_category})")
         
         st.dataframe(
             df_filtered,
