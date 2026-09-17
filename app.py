@@ -26,6 +26,7 @@ st.markdown("""
     }
     .text-buy { color: #00E676; font-weight: bold; }
     .text-sell { color: #FF5252; font-weight: bold; }
+    .text-black { color: #000000; font-weight: normal; }
     
     /* Table scroll container for maintaining scrolling bars */
     .table-container {
@@ -36,11 +37,12 @@ st.markdown("""
         border: 1px solid #262730;
         border-radius: 8px;
         margin-bottom: 1rem;
+        background-color: #ffffff;
     }
     table.custom-table {
         width: 100%;
         border-collapse: collapse;
-        color: #ffffff;
+        color: #000000;
         font-family: inherit;
         font-size: 14px;
     }
@@ -48,6 +50,7 @@ st.markdown("""
         position: sticky;
         top: 0;
         background-color: #1e222d;
+        color: #ffffff;
         padding: 10px;
         text-align: left;
         border-bottom: 2px solid #363a45;
@@ -55,8 +58,9 @@ st.markdown("""
     }
     table.custom-table td {
         padding: 8px 10px;
-        border-bottom: 1px solid #262730;
+        border-bottom: 1px solid #e0e0e0;
         white-space: nowrap;
+        color: #000000;
     }
     a.chart-btn {
         background-color: #2962ff;
@@ -94,7 +98,7 @@ if not st.session_state.authenticated:
 
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (NSE 750 Universe)")
-st.markdown("Trading Terminal featuring **Direct TradingView Chart Links**, **Intraday RSI Divergence**, **Weekly Volume Profile & VWAP Confluence**, and **Dynamic Red/Green Styling**.")
+st.markdown("Trading Terminal featuring **Direct TradingView Chart Links**, **Intraday RSI Divergence**, **Weekly Volume Profile & VWAP Confluence**, and **Dynamic Signal Formatting**.")
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
     "⚡ Intraday Engine (Tight SL + 5m RSI Divergence)", 
@@ -225,7 +229,7 @@ def fetch_chartink_stocks(scan_condition):
 def build_custom_html_table(df):
     """Renders HTML Table inside a scroll container with direct external target links."""
     if df.empty:
-        return "<p>No stocks found matching the current criteria.</p>"
+        return "<p style='color:#000000;'>No stocks found matching the current criteria.</p>"
     
     headers = "".join([f"<th>{col}</th>" for col in df.columns if col != 'RawVolume' and col != 'RawPnL'])
     rows = ""
@@ -305,41 +309,41 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
         chart_link = f'<a href="https://in.tradingview.com/chart/?symbol=NSE:{symbol}" target="_blank" class="chart-btn">📈 Open Chart</a>'
 
         if pct_change >= 0:
-            status_tag = f"<span class='text-buy'>🟢 BUY ({', '.join(green_reasons) if green_reasons else 'STRONG MOMENTUM'})</span>"
+            status_tag = f"BUY ({', '.join(green_reasons) if green_reasons else 'STRONG MOMENTUM'})"
             stock_entry = {
-                'Symbol': f"<span class='text-buy'>{symbol}</span>",
+                'Symbol': symbol,
                 'Signal': f"<span class='text-buy'>BUY</span>",
                 'Risk Analysis': status_tag,
-                'Session Open (₹)': f"<span class='text-buy'>₹{day_open}</span>",
-                'Session High (₹)': f"<span class='text-buy'>₹{day_high}</span>",
-                'Session Low (₹)': f"<span class='text-buy'>₹{day_low}</span>",
-                'Last Close/CMP (₹)': f"<span class='text-buy'>₹{cmp}</span>",
-                'VWAP (₹)': f"<span class='text-buy'>₹{vwap}</span>",
-                'Tight Entry (₹)': f"<span class='text-buy'>₹{entry_price}</span>",
-                'Small SL (₹)': f"<span class='text-buy'>₹{sl}</span>",
-                'Target 1 (₹)': f"<span class='text-buy'>₹{t1}</span>",
-                'Target 2 (₹)': f"<span class='text-buy'>₹{t2}</span>",
-                'Change (%)': f"<span class='text-buy'>{pct_change:+.2f}%</span>",
+                'Session Open (₹)': f"₹{day_open}",
+                'Session High (₹)': f"₹{day_high}",
+                'Session Low (₹)': f"₹{day_low}",
+                'Last Close/CMP (₹)': f"₹{cmp}",
+                'VWAP (₹)': f"₹{vwap}",
+                'Tight Entry (₹)': f"₹{entry_price}",
+                'Small SL (₹)': f"₹{sl}",
+                'Target 1 (₹)': f"₹{t1}",
+                'Target 2 (₹)': f"₹{t2}",
+                'Change (%)': f"{pct_change:+.2f}%",
                 'RawVolume': volume,
                 'Chart': chart_link
             }
             buy_list.append(stock_entry)
         else:
-            status_tag = f"<span class='text-sell'>🔴 SELL ({', '.join(red_reasons) if red_reasons else 'WEAK STRUCTURE'})</span>"
+            status_tag = f"SELL ({', '.join(red_reasons) if red_reasons else 'WEAK STRUCTURE'})"
             stock_entry = {
-                'Symbol': f"<span class='text-sell'>{symbol}</span>",
+                'Symbol': symbol,
                 'Signal': f"<span class='text-sell'>SELL</span>",
                 'Risk Analysis': status_tag,
-                'Session Open (₹)': f"<span class='text-sell'>₹{day_open}</span>",
-                'Session High (₹)': f"<span class='text-sell'>₹{day_high}</span>",
-                'Session Low (₹)': f"<span class='text-sell'>₹{day_low}</span>",
-                'Last Close/CMP (₹)': f"<span class='text-sell'>₹{cmp}</span>",
-                'VWAP (₹)': f"<span class='text-sell'>₹{vwap}</span>",
-                'Tight Entry (₹)': f"<span class='text-sell'>₹{entry_price}</span>",
-                'Small SL (₹)': f"<span class='text-sell'>₹{sl}</span>",
-                'Target 1 (₹)': f"<span class='text-sell'>₹{t1}</span>",
-                'Target 2 (₹)': f"<span class='text-sell'>₹{t2}</span>",
-                'Change (%)': f"<span class='text-sell'>{pct_change:+.2f}%</span>",
+                'Session Open (₹)': f"₹{day_open}",
+                'Session High (₹)': f"₹{day_high}",
+                'Session Low (₹)': f"₹{day_low}",
+                'Last Close/CMP (₹)': f"₹{cmp}",
+                'VWAP (₹)': f"₹{vwap}",
+                'Tight Entry (₹)': f"₹{entry_price}",
+                'Small SL (₹)': f"₹{sl}",
+                'Target 1 (₹)': f"₹{t1}",
+                'Target 2 (₹)': f"₹{t2}",
+                'Change (%)': f"{pct_change:+.2f}%",
                 'RawVolume': volume,
                 'Chart': chart_link
             }
@@ -421,36 +425,36 @@ def fetch_weekly_mtf_strategy(symbols):
 
             if is_buy:
                 results.append({
-                    'Symbol': f"<span class='text-buy'>{clean_sym}</span>",
-                    'Signal': f"<span class='text-buy'>STRONG BUY</span>",
-                    'Weekly Close (₹)': f"<span class='text-buy'>₹{cmp}</span>",
-                    'Weekly VWAP (₹)': f"<span class='text-buy'>₹{weekly_vwap}</span>",
-                    'Volume POC (₹)': f"<span class='text-buy'>₹{vol_poc}</span>",
-                    'Demand Zone (₹)': f"<span class='text-buy'>₹{best_demand_zone}</span>",
-                    'Supply Zone (₹)': f"<span class='text-buy'>₹{best_supply_zone}</span>",
-                    'Weekly RSI': f"<span class='text-buy'>{curr_rsi}</span>",
-                    'Strategy Setup': f"<span class='text-buy'>🟢 {setup_type}</span>",
-                    'Tight Entry (₹)': f"<span class='text-buy'>₹{entry}</span>",
-                    'Small SL (₹)': f"<span class='text-buy'>₹{sl}</span>",
-                    'Target 1 (₹)': f"<span class='text-buy'>₹{t1}</span>",
-                    'Target 2 (₹)': f"<span class='text-buy'>₹{t2}</span>",
+                    'Symbol': clean_sym,
+                    'Signal': f"<span class='text-buy'>BUY</span>",
+                    'Weekly Close (₹)': f"₹{cmp}",
+                    'Weekly VWAP (₹)': f"₹{weekly_vwap}",
+                    'Volume POC (₹)': f"₹{vol_poc}",
+                    'Demand Zone (₹)': f"₹{best_demand_zone}",
+                    'Supply Zone (₹)': f"₹{best_supply_zone}",
+                    'Weekly RSI': curr_rsi,
+                    'Strategy Setup': setup_type,
+                    'Tight Entry (₹)': f"₹{entry}",
+                    'Small SL (₹)': f"₹{sl}",
+                    'Target 1 (₹)': f"₹{t1}",
+                    'Target 2 (₹)': f"₹{t2}",
                     'Chart': chart_link
                 })
             else:
                 results.append({
-                    'Symbol': f"<span class='text-sell'>{clean_sym}</span>",
-                    'Signal': f"<span class='text-sell'>STRONG SELL</span>",
-                    'Weekly Close (₹)': f"<span class='text-sell'>₹{cmp}</span>",
-                    'Weekly VWAP (₹)': f"<span class='text-sell'>₹{weekly_vwap}</span>",
-                    'Volume POC (₹)': f"<span class='text-sell'>₹{vol_poc}</span>",
-                    'Demand Zone (₹)': f"<span class='text-sell'>₹{best_demand_zone}</span>",
-                    'Supply Zone (₹)': f"<span class='text-sell'>₹{best_supply_zone}</span>",
-                    'Weekly RSI': f"<span class='text-sell'>{curr_rsi}</span>",
-                    'Strategy Setup': f"<span class='text-sell'>🔴 {setup_type}</span>",
-                    'Tight Entry (₹)': f"<span class='text-sell'>₹{entry}</span>",
-                    'Small SL (₹)': f"<span class='text-sell'>₹{sl}</span>",
-                    'Target 1 (₹)': f"<span class='text-sell'>₹{t1}</span>",
-                    'Target 2 (₹)': f"<span class='text-sell'>₹{t2}</span>",
+                    'Symbol': clean_sym,
+                    'Signal': f"<span class='text-sell'>SELL</span>",
+                    'Weekly Close (₹)': f"₹{cmp}",
+                    'Weekly VWAP (₹)': f"₹{weekly_vwap}",
+                    'Volume POC (₹)': f"₹{vol_poc}",
+                    'Demand Zone (₹)': f"₹{best_demand_zone}",
+                    'Supply Zone (₹)': f"₹{best_supply_zone}",
+                    'Weekly RSI': curr_rsi,
+                    'Strategy Setup': setup_type,
+                    'Tight Entry (₹)': f"₹{entry}",
+                    'Small SL (₹)': f"₹{sl}",
+                    'Target 1 (₹)': f"₹{t1}",
+                    'Target 2 (₹)': f"₹{t2}",
                     'Chart': chart_link
                 })
         except Exception:
@@ -492,14 +496,14 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
                 else: status, pnl_val = "⏳ Closed at Market", round(((close_price - entry_price) / entry_price) * 100, 2)
                 
                 results.append({
-                    "Symbol": f"<span class='text-buy'>{symbol}</span>",
+                    "Symbol": symbol,
                     "Signal": f"<span class='text-buy'>BUY</span>",
-                    "Session Open (₹)": f"<span class='text-buy'>₹{open_price}</span>",
-                    "Session High (₹)": f"<span class='text-buy'>₹{max_price}</span>",
-                    "Session Low (₹)": f"<span class='text-buy'>₹{min_price}</span>",
-                    "Session Close (₹)": f"<span class='text-buy'>₹{close_price}</span>",
-                    "Status": f"<span class='text-buy'>{status}</span>",
-                    "P&L (%)": f"<span class='text-buy'>{pnl_val:+.2f}%</span>",
+                    "Session Open (₹)": f"₹{open_price}",
+                    "Session High (₹)": f"₹{max_price}",
+                    "Session Low (₹)": f"₹{min_price}",
+                    "Session Close (₹)": f"₹{close_price}",
+                    "Status": status,
+                    "P&L (%)": f"{pnl_val:+.2f}%",
                     "RawPnL": pnl_val,
                     "Chart": chart_link
                 })
@@ -511,14 +515,14 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
                 else: status, pnl_val = "⏳ Closed at Market", round(((entry_price - close_price) / entry_price) * 100, 2)
                 
                 results.append({
-                    "Symbol": f"<span class='text-sell'>{symbol}</span>",
+                    "Symbol": symbol,
                     "Signal": f"<span class='text-sell'>SELL</span>",
-                    "Session Open (₹)": f"<span class='text-sell'>₹{open_price}</span>",
-                    "Session High (₹)": f"<span class='text-sell'>₹{max_price}</span>",
-                    "Session Low (₹)": f"<span class='text-sell'>₹{min_price}</span>",
-                    "Session Close (₹)": f"<span class='text-sell'>₹{close_price}</span>",
-                    "Status": f"<span class='text-sell'>{status}</span>",
-                    "P&L (%)": f"<span class='text-sell'>{pnl_val:+.2f}%</span>",
+                    "Session Open (₹)": f"₹{open_price}",
+                    "Session High (₹)": f"₹{max_price}",
+                    "Session Low (₹)": f"₹{min_price}",
+                    "Session Close (₹)": f"₹{close_price}",
+                    "Status": status,
+                    "P&L (%)": f"{pnl_val:+.2f}%",
                     "RawPnL": pnl_val,
                     "Chart": chart_link
                 })
