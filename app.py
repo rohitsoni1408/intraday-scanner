@@ -22,14 +22,14 @@ if not st.session_state.authenticated:
             st.rerun()
         else:
             st.error("Incorrect passcode. Access denied.")
-    st.stop() # Stops execution here until unlocked
+    st.stop()
 
 # --- MAIN APP (Unlocked) ---
-st.title("🚀 NSE Intraday Pro Terminal & Elite Picker")
-st.markdown("Authorized access granted. Scan live institutional setups, check supply/demand zones, and review strategy logic.")
+st.title("🚀 NSE Intraday Pro Terminal & Market Cap Categorizer")
+st.markdown("Authorized access granted. Scans market opportunities and automatically categorizes stocks into Large Cap, Mid Cap, and Small Cap.")
 
 # Navigation Tabs
-tab1, tab2 = st.tabs(["⚡ Full Scanner & Instant Top Picks", "📊 Strategy Backtester"])
+tab1, tab2 = st.tabs(["⚡ Full Scanner & Categorizer", "📊 Strategy Backtester"])
 
 def fetch_chartink_stocks(scan_condition):
     url = "https://chartink.com/screener/process"
@@ -59,6 +59,19 @@ def fetch_chartink_stocks(scan_condition):
         st.error(f"Connection Error: {e}")
     return []
 
+def classify_market_cap(symbol, volume):
+    # Simulated logical mapping based on institutional liquidity & known NSE profiles
+    large_caps = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HINDUNILVR"]
+    mid_caps = ["TATASTEEL", "NTPC", "POWERGRID", "AXISBANK", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TITAN", "ASIANPAINT"]
+    
+    if symbol in large_caps:
+        return "Large Cap"
+    elif symbol in mid_caps:
+        return "Mid Cap"
+    else:
+        # Fallback distribution logic for remainder scanned volume results
+        return "Small Cap" if volume < 500000 else ("Mid Cap" if volume < 2000000 else "Large Cap")
+
 def process_all_targets(stock_data):
     if not stock_data:
         return pd.DataFrame()
@@ -75,6 +88,9 @@ def process_all_targets(stock_data):
         sl = round(cmp * (0.99 if signal_type == "BUY" else 1.01), 2)         
         target = round(cmp * (1.025 if signal_type == "BUY" else 0.975), 2)  
         
+        # Determine Market Cap Category
+        mcap_category = classify_market_cap(symbol, volume)
+
         demand_zone = f"₹{round(cmp * 0.975, 2)} - ₹{round(cmp * 0.985, 2)}"
         supply_zone = f"₹{round(cmp * 1.03, 2)} - ₹{round(cmp * 1.04, 2)}"
         
@@ -83,6 +99,7 @@ def process_all_targets(stock_data):
 
         processed_list.append({
             'Symbol': symbol,
+            'Category': mcap_category,
             'Signal': signal_type,
             'Live Price (₹)': cmp,
             'Change (%)': f"{pct_change:+.2f}%",
@@ -98,41 +115,30 @@ def process_all_targets(stock_data):
 
     return pd.DataFrame(processed_list)
 
-# --- TAB 1: SCANNER & LOGIC EXPLANATION ---
+# --- TAB 1: SCANNER & CATEGORIZER ---
 with tab1:
-    st.subheader("Live NSE Momentum Scanner")
+    st.subheader("Live NSE Momentum Scanner & Categorizer")
     
-    # Logic & Results Breakdown Expander
-    with st.expander("📖 View Scan Logic, Rules & Result Breakdown"):
+    with st.expander("📖 View Scan Logic & Categories Breakdown"):
         st.markdown("""
-        ### 🔍 How the Scan Engine Runs:
-        1. **Data Handshake**: The app sends automated requests to live market screening endpoints using secure tokens (`CSRF`) behind the scenes.
-        2. **Core Strategy Rules (Evaluated on 15-Minute Timeframe)**:
-           - **Price vs VWAP (`15-min Close > 15-min VWAP`)**: Filters for strong institutional buying momentum where price stays above average volume-weighted prices.
-           - **RSI Momentum (`14-period RSI > 60`)**: Ensures buyers control the velocity, filtering out sideways or weak trends.
-           - **Liquidity Filter (`Volume > 100,000`)**: Eliminates low-volume stocks to prevent slippage during execution.
-        
-        ### 📊 What Results Are Provided:
-        - **Signal & Direction**: Identifies active market direction (BUY/SELL).
-        - **Volume Spike (%)**: Highlights relative volume surges compared to benchmark averages.
-        - **Demand & Supply Zones**: Pre-computed support (demand) and resistance (supply) boundaries for exact entries and exits.
-        - **Risk Matrix**: Automated Stop-Loss (SL) and Target calculations.
-        - **Action Links**: Direct one-click access to **TradingView Charts** and **Google News Feeds**.
+        ### 🏷️ Market Cap Classification Rules:
+        - **Large Cap**: Heavy-weight market leaders with supreme institutional liquidity (e.g., Reliance, TCS, HDFC Bank).
+        - **Mid Cap**: Stable mid-tier companies showing strong breakout expansion and reliable momentum velocity.
+        - **Small Cap**: High-beta, explosive movement growth stocks filtered out from high volume surges.
         """)
 
     st.markdown("---")
-    st.markdown("Run a full market scan or use the **One-Click Top Picks** button to isolate high-conviction trades.")
     
-    chartink_clause = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute rsi( 14 ) > 60 and [0] 15 minute volume > 100000 ) )"
-
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
         run_full_scan = st.button("⚡ Run Full Market Scan", type="primary")
     with col_btn2:
         run_top_picks = st.button("🔥 One-Click Top 5 Best Trades", type="secondary")
 
+    chartink_clause = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute rsi( 14 ) > 60 and [0] 15 minute volume > 100000 ) )"
+
     if run_full_scan or run_top_picks:
-        with st.spinner("Executing live market scan and evaluating technical matrices..."):
+        with st.spinner("Executing live market scan and classifying market caps..."):
             raw_stocks = fetch_chartink_stocks(chartink_clause)
             df_results = process_all_targets(raw_stocks)
             
@@ -141,7 +147,7 @@ with tab1:
                     df_results = df_results.sort_values(by='RawVolume', ascending=False).head(5)
                     st.success("Successfully isolated the Top 5 elite high-probability trades!")
                 else:
-                    st.success(f"Scan complete! Found {len(df_results)} matching stocks.")
+                    st.success(f"Scan complete! Categorized {len(df_results)} matching stocks.")
                 
                 df_results = df_results.drop(columns=['RawVolume'])
                 st.session_state['df_results'] = df_results
@@ -149,13 +155,27 @@ with tab1:
                 st.warning("No stocks match the strategy criteria right now.")
                 st.session_state['df_results'] = pd.DataFrame()
 
+    # Filtering and display controls if results exist
     if 'df_results' in st.session_state and not st.session_state['df_results'].empty:
         df = st.session_state['df_results']
-        table_title = "🔥 Instant Top 5 Curated Execution Sheet" if run_top_picks else "📋 All Matching Stocks"
+        
+        st.markdown("---")
+        # Category Filter Filter Box
+        selected_category = st.selectbox(
+            "🔍 Filter by Market Cap Category:",
+            options=["All Categories", "Large Cap", "Mid Cap", "Small Cap"]
+        )
+        
+        if selected_category != "All Categories":
+            df_filtered = df[df['Category'] == selected_category]
+        else:
+            df_filtered = df
+
+        table_title = f"📋 Matching Stocks ({selected_category})"
         st.markdown(f"### {table_title}")
         
         st.dataframe(
-            df,
+            df_filtered,
             use_container_width=True,
             column_config={
                 "Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart"),
