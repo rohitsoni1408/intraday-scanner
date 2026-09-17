@@ -1,734 +1,115 @@
-import streamlit as st
-import requests
-from bs4 import BeautifulSoup
+import datetime
+import pytz
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, time, timedelta
 
-# Page Configuration
-st.set_page_config(page_title="Ultimate Multi-Timeframe Confluence Terminal", layout="wide")
+# -------------------------------------------------------------------
+# Configuration & Watchlist
+# -------------------------------------------------------------------
+WATCHLIST = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "ICICIBANK.NS", "HDFCBANK.NS"]
+TIMEZONE = pytz.timezone("Asia/Kolkata")
 
-# --- CUSTOM 3D & GLOW UI STYLING ---
-st.markdown("""
-<style>
-    .main { background-color: #0e1117; }
-    .stButton>button {
-        border-radius: 12px;
-        font-weight: 700;
-        letter-spacing: 0.5px;
-        box-shadow: 0 8px 16px rgba(0,0,0,0.3);
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 12px 20px rgba(0,0,0,0.4);
-    }
-</style>
-""", unsafe_allow_html=True)
+def is_market_open():
+    """Checks if Indian markets (NSE/BSE) are currently open."""
+    now = datetime.datetime.now(TIMEZONE)
+    # Monday = 0, Sunday = 6
+    if now.weekday() >= 5:
+        return False
+    
+    market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return market_start <= now <= market_end
 
-# --- PASSCODE AUTHENTICATION ---
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
+def scan_symbol(symbol, market_active):
+    ticker = yf.Ticker(symbol)
+    
+    if market_active:
+        # Fetch Intraday 5-min data for live scanning
+        df = ticker.history(period="1d", interval="5m")
+        if df.empty:
+            return None
+        
+        latest_price = df['Close'].iloc[-1]
+        high_20 = df['High'].tail(20).max()
+        low_20 = df['Low'].tail(20).min()
+        
+        # Simple intraday breakout logic
+        if latest_price >= high_20:
+            signal = "LIVE BUY BREAKOUT"
+            entry = latest_price
+            sl = low_20
+            target = entry + (entry - sl) * 1.5
+        elif latest_price <= low_20:
+            signal = "LIVE SELL BREAKOUT"
+            entry = latest_price
+            sl = high_20
+            target = entry - (sl - entry) * 1.5
+        else:
+            return None
+            
+        return {
+            "Symbol": symbol,
+            "Mode": "Live Intraday",
+            "Signal": signal,
+            "Entry": round(entry, 2),
+            "SL": round(sl, 2),
+            "Target 1": round(target, 2),
+            "Target 2": round(entry + (entry - sl) * 2.5 if "BUY" in signal else entry - (sl - entry) * 2.5, 2)
+        }
 
-if not st.session_state.authenticated:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("### 🔒 Secure Terminal")
-        st.markdown("Enter your security passcode to access elite trade flows.")
-        passcode_input = st.text_input("Passcode:", type="password")
-        if st.button("🔓 Authenticate Terminal", type="primary", use_container_width=True):
-            if passcode_input == "Ginni":
-                st.session_state.authenticated = True
-                st.rerun()
-            else:
-                st.error("Incorrect passcode. Access denied.")
-    st.stop()
-
-# --- MAIN APP (Unlocked) ---
-st.title("👑 NSE Ultimate Master Confluence Engine")
-st.markdown("Simultaneously filtering non-penny setups across **MTF Trends, Volume ORB, RSI/MACD/VWAP, Bollinger Re-tests, and Fibonacci Ratios**.")
-
-# 3 Main Tabs: Intraday Scanner, Intraday Backtester, and Swing/Weekly Engine
-main_tab1, main_tab2, main_tab3 = st.tabs([
-    "⚡ Master Confluence Execution Feed", 
-    "📊 Intraday Backtester & Time Engine",
-    "🗓️ Swing / Weekly Engine & Backtester"
-])
-
-# --- EXPANDED LARGE & MID CAP UNIVERSE ---
-LARGE_CAPS = {
-    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HINDUNILVR",
-    "AXISBANK", "KOTAKBANK", "SUNPHARMA", "TITAN", "BAJFINANCE", "MARUTI", "NTPC", "POWERGRID", "ASIANPAINT",
-    "ULTRACEMCO", "TATAMOTORS", "COALINDIA", "TATASTEEL", "ADANIENT", "ADANIPORTS", "JSWSTEEL", "HCLTECH",
-    "ONGC", "M&M", "GRASIM", "BAJAJ-AUTO", "NESTLEIND", "SIEMENS", "BEL", "HAL", "IOC", "DLF", "VBL",
-    "LODHA", "ZYDUSLIFE", "INDUSINDBK", "BAJAJHFL", "TORNTPHARM", "APOLLOHOSP", "HYUNDAI", "BAJAJFINSV",
-    "DRREDDY", "SHREECEM", "BAJAJHLDNG", "UNITDSPR", "ABB", "EICHERMOT", "DIVISLAB", "LICI", "INDHOTEL",
-    "ICICIGI", "CGPOWER", "TRENT", "MOTHERSON", "ADANIPOWER", "JINDALSTEL", "PFC", "TECHM", "LTIM", "WIPRO"
-}
-
-MID_CAPS = {
-    "PERSISTENT", "POLYCAB", "DIXON", "COFORGE", "MPHASIS", "ASTRAL", "SUPREMEIND", "PAGEIND",
-    "MUTHOOTFIN", "CHOLAFIN", "ASHOKLEY", "OBEROIRLTY", "BALKRISIND", "CUMMINSIND", "TIINDIA",
-    "MAXHEALTH", "LUPIN", "AUROPHARMA", "BOSCHLTD", "BHARATFORG", "PIIND", "SRF", "IDEA", "YESBANK",
-    "IDFCFIRSTB", "TATAINVEST", "KPRMILL", "NAUKRI", "LENSKART", "KALYANKJIL", "OFSS", "ANTHEM",
-    "RADICO", "GLAXO", "LGEINDIA", "FEDERALBNK", "AJANTPHARM", "TATACOMM", "EXIDEIND", "OIL",
-    "PETRONET", "LLOYDSME", "PREMIERENE", "LICHSGFIN", "ESCORTS", "GODREJPROP", "ABBOTINDIA", "BHEL"
-}
-
-# Combine to create a master scanning pool for Large & Mid Caps
-LARGE_AND_MID_POOL = list(LARGE_CAPS.union(MID_CAPS))
-
-# --- CHARTINK SCAN CLAUSES (Targeting Nifty 100 & Nifty Midcap 150) ---
-DEFAULT_SCAN_CLAUSE = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 150000 and [0] 15 minute close > 50 ) )"
-WEEKLY_SCAN_CLAUSE = "( {cash ( segment \"nifty 100\" or segment \"nifty midcap 150\" ) } ( [0] weekly close > [0] weekly sma(weekly close, 20) and [0] weekly volume > [1] weekly volume and [0] weekly close > 50 ) )"
-
-def classify_market_cap(symbol):
-    """Accurately classifies Market Cap as per NSE / SEBI Top 100/150/251+ frameworks."""
-    sym = symbol.upper().strip()
-    if sym in LARGE_CAPS:
-        return "Large Cap"
-    elif sym in MID_CAPS:
-        return "Mid Cap"
     else:
-        return "Small Cap"
-
-# --- REAL-TIME LIVE INTRADAY PRICE & VWAP FETCHING ENGINE ---
-@st.cache_data(ttl=15)
-def fetch_live_market_data(symbols):
-    """Fetches real-time intraday open, high, low, close (CMP), volume, and VWAP from yfinance."""
-    data_dict = {}
-    
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_intraday = ticker.history(period="1d", interval="5m")
-            
-            if df_intraday.empty:
-                continue
-                
-            day_open = round(float(df_intraday.iloc[0]['Open']), 2)
-            day_high = round(float(df_intraday['High'].max()), 2)
-            day_low = round(float(df_intraday['Low'].min()), 2)
-            cmp = round(float(df_intraday.iloc[-1]['Close']), 2)
-            prev_close = round(float(ticker.fast_info.previous_close), 2)
-            pct_change = round(((cmp - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
-            volume = int(df_intraday['Volume'].sum())
-
-            # Calculate Intraday VWAP
-            total_vol = df_intraday['Volume'].sum()
-            if total_vol > 0:
-                vwap = round(float((df_intraday['Close'] * df_intraday['Volume']).sum() / total_vol), 2)
-            else:
-                vwap = cmp
-
-            data_dict[clean_sym] = {
-                "cmp": cmp,
-                "day_open": day_open,
-                "prev_close": prev_close,
-                "chg": pct_change,
-                "vol": volume,
-                "day_high": day_high,
-                "day_low": day_low,
-                "vwap": vwap
-            }
-        except Exception:
-            continue
-            
-    return data_dict
-
-# --- HIGHER TIMEFRAME (WEEKLY/DAILY) LIVE DATA ENGINE ---
-@st.cache_data(ttl=60)
-def fetch_weekly_market_data(symbols):
-    """Fetches higher timeframe (Weekly/Daily) price data for swing setups."""
-    data_dict = {}
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_daily = ticker.history(period="3mo", interval="1d")
-            
-            if df_daily.empty or len(df_daily) < 10:
-                continue
-
-            cmp = round(float(df_daily.iloc[-1]['Close']), 2)
-            w_open = round(float(df_daily.iloc[-5]['Open']), 2) if len(df_daily) >= 5 else round(float(df_daily.iloc[0]['Open']), 2)
-            w_high = round(float(df_daily.tail(5)['High'].max()), 2)
-            w_low = round(float(df_daily.tail(5)['Low'].min()), 2)
-            volume = int(df_daily.tail(5)['Volume'].sum())
-            prev_close = round(float(df_daily.iloc[-6]['Close']), 2) if len(df_daily) >= 6 else w_open
-            pct_change = round(((cmp - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
-
-            data_dict[clean_sym] = {
-                "cmp": cmp,
-                "w_open": w_open,
-                "w_high": w_high,
-                "w_low": w_low,
-                "chg": pct_change,
-                "vol": volume
-            }
-        except Exception:
-            continue
-            
-    return data_dict
-
-def fetch_chartink_stocks(scan_condition):
-    url = "https://chartink.com/screener/process"
-    screener_main_url = "https://chartink.com/screener/"
-    
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
-    })
-
-    try:
-        response = session.get(screener_main_url)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        csrf_token = soup.find('meta', {'name': 'csrf-token'})['content']
+        # Fetch Daily data for Next-Session Planning
+        df = ticker.history(period="5d", interval="1d")
+        if len(df) < 2:
+            return None
         
-        session.headers.update({
-            'x-csrf-token': csrf_token,
-            'X-Requested-With': 'XMLHttpRequest'
-        })
-
-        payload = {'scan_clause': scan_condition}
-        post_response = session.post(url, data=payload)
+        prev_day = df.iloc[-1]
+        close = prev_day['Close']
+        pdh = prev_day['High']
+        pdl = prev_day['Low']
+        atr = (pdh - pdl)  # Simple Daily Range as ATR substitute
         
-        if post_response.status_code == 200:
-            return post_response.json().get('data', [])
-    except Exception as e:
-        st.error(f"Connection Error: {e}")
-    return []
-
-def process_ultimate_confluence(stock_data, top_n_count):
-    """Processes liquid non-penny equities and calculates intraday level metrics."""
-    buy_list = []
-    sell_list = []
-    
-    default_symbols = LARGE_AND_MID_POOL[:30]
-    extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in stock_data if item.get('nsecode', item.get('symbol', ''))]
-    
-    # Ensure sufficient stock candidates by merging scan output with Large/Mid Cap pool
-    active_symbols = list(dict.fromkeys(extracted_symbols + default_symbols))
-
-    live_prices = fetch_live_market_data(active_symbols)
-
-    for symbol in active_symbols:
-        live_info = live_prices.get(symbol)
+        # Key Level Setup for Next Session
+        # Long above PDH + Buffer; Short below PDL - Buffer
+        buy_entry = pdh + (atr * 0.05)
+        buy_sl = pdh - (atr * 0.3)
+        buy_t1 = buy_entry + (atr * 0.8)
+        buy_t2 = buy_entry + (atr * 1.5)
         
-        if not live_info:
-            continue
-            
-        cmp = live_info['cmp']
-        day_open = live_info['day_open']
-        pct_change = live_info['chg']
-        volume = live_info['vol']
-        day_high = live_info['day_high']
-        day_low = live_info['day_low']
-        vwap = live_info['vwap']
+        sell_entry = pdl - (atr * 0.05)
+        sell_sl = pdl + (atr * 0.3)
+        sell_t1 = sell_entry - (atr * 0.8)
+        sell_t2 = sell_entry - (atr * 1.5)
 
-        # Absolute Penny Stock Filter (< ₹50)
-        if cmp < 50.0:
-            continue
-
-        diff = day_high - day_low
-        
-        if pct_change >= 0:
-            fib_618 = round(day_high - (diff * 0.618), 2)
-            entry_price = fib_618 if fib_618 > day_low else round(cmp * 0.995, 2)
-            sl = round(entry_price * 0.99, 2)
-            t1 = round(day_high, 2)
-            t2 = round(day_high + (diff * 0.5), 2)
-        else:
-            fib_618 = round(day_low + (diff * 0.618), 2)
-            entry_price = fib_618 if fib_618 < day_high else round(cmp * 1.005, 2)
-            sl = round(entry_price * 1.01, 2)
-            t1 = round(day_low, 2)
-            t2 = round(day_low - (diff * 0.5), 2)
-
-        confluence_score = "96.5% (5/5 Confluence)" if abs(pct_change) > 2.0 else "91.2% (4/5 Confluence)"
-        tv_link = f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
-
-        stock_entry = {
-            'Symbol': symbol,
-            'Category': classify_market_cap(symbol),
-            'Day Open (₹)': day_open,
-            'Day High (₹)': day_high,
-            'Day Low (₹)': day_low,
-            'Live CMP (₹)': cmp,
-            'VWAP (₹)': vwap,
-            'Entry Price (₹)': entry_price,
-            'Stop Loss (₹)': sl,
-            'Target 1 (₹)': t1,
-            'Target 2 (₹)': t2,
-            'Master Score': confluence_score,
-            'Change (%)': f"{pct_change:+.2f}%",
-            'RawVolume': volume,
-            'Live Chart': tv_link,
-            'News Feed': f"https://www.google.com/search?q={symbol}+stock+news+NSE+today"
+        return {
+            "Symbol": symbol,
+            "Mode": "Next Session Prep",
+            "PDH (High)": round(pdh, 2),
+            "PDL (Low)": round(pdl, 2),
+            "Bullish Entry": round(buy_entry, 2),
+            "Bullish SL": round(buy_sl, 2),
+            "Bullish T1": round(buy_t1, 2),
+            "Bearish Entry": round(sell_entry, 2),
+            "Bearish SL": round(sell_sl, 2),
+            "Bearish T1": round(sell_t1, 2),
         }
 
-        if pct_change >= 0:
-            buy_list.append(stock_entry)
-        else:
-            sell_list.append(stock_entry)
-
-    df_buy = pd.DataFrame(buy_list).sort_values(by='RawVolume', ascending=False).head(top_n_count) if buy_list else pd.DataFrame()
-    df_sell = pd.DataFrame(sell_list).sort_values(by='RawVolume', ascending=False).head(top_n_count) if sell_list else pd.DataFrame()
-
-    return df_buy, df_sell
-
-# --- PROCESS WEEKLY SWING CONFLUENCE SETUPS (LARGE & MID CAP FOCUSED) ---
-def process_weekly_confluence(stock_data, top_n_count):
-    """Calculates multi-day/weekly level metrics specifically for Large & Mid Cap stocks."""
-    buy_list = []
-    sell_list = []
-    
-    extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in stock_data if item.get('nsecode', item.get('symbol', ''))]
-    
-    # Merge Chartink results with the Large & Mid Cap master pool to ensure a full list of top stocks
-    active_symbols = list(dict.fromkeys(extracted_symbols + LARGE_AND_MID_POOL))
-
-    weekly_prices = fetch_weekly_market_data(active_symbols)
-
-    for symbol in active_symbols:
-        winfo = weekly_prices.get(symbol)
-        if not winfo or winfo['cmp'] < 50.0:
-            continue
-            
-        cmp = winfo['cmp']
-        w_open = winfo['w_open']
-        w_high = winfo['w_high']
-        w_low = winfo['w_low']
-        pct_change = winfo['chg']
-        volume = winfo['vol']
-
-        diff = w_high - w_low
-        
-        if pct_change >= 0:
-            entry_price = cmp
-            sl = round(entry_price * 0.97, 2)       # 3% Swing SL
-            t1 = round(entry_price * 1.05, 2)      # 5% Target 1
-            t2 = round(entry_price * 1.10, 2)      # 10% Target 2
-        else:
-            entry_price = cmp
-            sl = round(entry_price * 1.03, 2)       # 3% Swing SL
-            t1 = round(entry_price * 0.95, 2)      # 5% Target 1
-            t2 = round(entry_price * 0.90, 2)      # 10% Target 2
-
-        stock_entry = {
-            'Symbol': symbol,
-            'Category': classify_market_cap(symbol),
-            'Weekly Open (₹)': w_open,
-            'Weekly High (₹)': w_high,
-            'Weekly Low (₹)': w_low,
-            'Live CMP (₹)': cmp,
-            'Entry Price (₹)': entry_price,
-            'Stop Loss (3%) (₹)': sl,
-            'Target 1 (5%) (₹)': t1,
-            'Target 2 (10%) (₹)': t2,
-            'Swing Trend': "🔥 Strong Bullish" if pct_change > 3 else ("Bullish" if pct_change > 0 else "Bearish"),
-            'Weekly Change (%)': f"{pct_change:+.2f}%",
-            'RawVolume': volume,
-            'Live Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
-        }
-
-        # Focus strictly on Large & Mid cap categories
-        if stock_entry['Category'] in ["Large Cap", "Mid Cap"]:
-            if pct_change >= 0:
-                buy_list.append(stock_entry)
-            else:
-                sell_list.append(stock_entry)
-
-    df_buy = pd.DataFrame(buy_list).sort_values(by='RawVolume', ascending=False).head(top_n_count) if buy_list else pd.DataFrame()
-    df_sell = pd.DataFrame(sell_list).sort_values(by='RawVolume', ascending=False).head(top_n_count) if sell_list else pd.DataFrame()
-
-    return df_buy, df_sell
-
-# --- REAL-TIME BACKTESTING PRICE HISTORICAL ENGINE (INTRADAY) ---
-def run_live_backtest(target_date, scan_clause, top_n_count):
-    """Runs intraday backtest using single session intraday 5m data."""
-    raw_stocks = fetch_chartink_stocks(scan_clause)
-    extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
-    stock_list = list(dict.fromkeys(extracted_symbols + LARGE_AND_MID_POOL[:20]))[:top_n_count*2]
+def run_scanner():
+    active = is_market_open()
+    status_str = "OPEN (Scanning Live)" if active else "CLOSED (Preparing Next Session Levels)"
+    print(f"\n--- Market Status: {status_str} ---")
     
     results = []
-    
-    for symbol in stock_list:
-        try:
-            ticker_str = f"{symbol.strip().upper()}.NS"
-            ticker = yf.Ticker(ticker_str)
+    for sym in WATCHLIST:
+        data = scan_symbol(sym, active)
+        if data:
+            results.append(data)
             
-            start_dt = datetime.combine(target_date, datetime.min.time())
-            end_dt = start_dt + timedelta(days=1)
-            
-            df_hist = ticker.history(interval="5m", start=start_dt, end=end_dt)
-            
-            if df_hist.empty:
-                continue
-                
-            open_price = round(float(df_hist.iloc[0]['Open']), 2)
-            max_price = round(float(df_hist['High'].max()), 2)
-            min_price = round(float(df_hist['Low'].min()), 2)
-            close_price = round(float(df_hist.iloc[-1]['Close']), 2)
+    if results:
+        res_df = pd.DataFrame(results)
+        print(res_df.to_string(index=False))
+    else:
+        print("No setup signals triggered.")
 
-            if open_price < 50.0:
-                continue
-
-            is_buy = close_price >= open_price
-            signal = "BUY" if is_buy else "SELL"
-            entry_price = open_price
-            
-            if is_buy:
-                sl = round(entry_price * 0.99, 2)
-                t1 = round(entry_price * 1.015, 2)
-                t2 = round(entry_price * 1.03, 2)
-                
-                if max_price >= t2:
-                    status = "🎯 Target 2 Hit"
-                    pnl_pct = round(((t2 - entry_price) / entry_price) * 100, 2)
-                elif max_price >= t1:
-                    status = "🎯 Target 1 Hit"
-                    pnl_pct = round(((t1 - entry_price) / entry_price) * 100, 2)
-                elif min_price <= sl:
-                    status = "🛑 SL Hit"
-                    pnl_pct = round(((sl - entry_price) / entry_price) * 100, 2)
-                else:
-                    status = "⏳ Open/Closed at Market"
-                    pnl_pct = round(((close_price - entry_price) / entry_price) * 100, 2)
-            else:
-                sl = round(entry_price * 1.01, 2)
-                t1 = round(entry_price * 0.985, 2)
-                t2 = round(entry_price * 0.97, 2)
-                
-                if min_price <= t2:
-                    status = "🎯 Target 2 Hit"
-                    pnl_pct = round(((entry_price - t2) / entry_price) * 100, 2)
-                elif min_price <= t1:
-                    status = "🎯 Target 1 Hit"
-                    pnl_pct = round(((entry_price - t1) / entry_price) * 100, 2)
-                elif max_price >= sl:
-                    status = "🛑 SL Hit"
-                    pnl_pct = round(((entry_price - sl) / entry_price) * 100, 2)
-                else:
-                    status = "⏳ Open/Closed at Market"
-                    pnl_pct = round(((entry_price - close_price) / entry_price) * 100, 2)
-
-            results.append({
-                "Symbol": symbol,
-                "Category": classify_market_cap(symbol),
-                "Signal": signal,
-                "Session Open (₹)": open_price,
-                "Session High (₹)": max_price,
-                "Session Low (₹)": min_price,
-                "Session Close (₹)": close_price,
-                "Intraday Entry (₹)": entry_price,
-                "Stop Loss (₹)": sl,
-                "Target 1 (₹)": t1,
-                "Target 2 (₹)": t2,
-                "Status": status,
-                "P&L (%)": f"{pnl_pct:+.2f}%",
-                "Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
-            })
-            
-            if len(results) >= top_n_count:
-                break
-        except Exception:
-            continue
-
-    return pd.DataFrame(results)
-
-# --- WEEKLY SWING BACKTESTER ENGINE ---
-def run_weekly_backtest(start_date, scan_clause, top_n_count, hold_weeks=2):
-    """Backtests multi-week swing performance focused on Large and Mid Caps."""
-    raw_stocks = fetch_chartink_stocks(scan_clause)
-    extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
-    stock_list = list(dict.fromkeys(extracted_symbols + LARGE_AND_MID_POOL))[:top_n_count*2]
-    
-    results = []
-    end_date = start_date + timedelta(weeks=hold_weeks)
-    
-    for symbol in stock_list:
-        try:
-            ticker_str = f"{symbol.strip().upper()}.NS"
-            ticker = yf.Ticker(ticker_str)
-            
-            df_hist = ticker.history(interval="1d", start=start_date, end=end_date)
-            if df_hist.empty or len(df_hist) < 3:
-                continue
-
-            entry_price = round(float(df_hist.iloc[0]['Open']), 2)
-            max_price = round(float(df_hist['High'].max()), 2)
-            min_price = round(float(df_hist['Low'].min()), 2)
-            final_close = round(float(df_hist.iloc[-1]['Close']), 2)
-
-            if entry_price < 50.0:
-                continue
-
-            sl = round(entry_price * 0.97, 2)
-            t1 = round(entry_price * 1.05, 2)
-            t2 = round(entry_price * 1.10, 2)
-
-            if max_price >= t2:
-                status = "🎯 Target 2 Hit (+10%)"
-                pnl_pct = round(((t2 - entry_price) / entry_price) * 100, 2)
-            elif max_price >= t1:
-                status = "🎯 Target 1 Hit (+5%)"
-                pnl_pct = round(((t1 - entry_price) / entry_price) * 100, 2)
-            elif min_price <= sl:
-                status = "🛑 SL Hit (-3%)"
-                pnl_pct = round(((sl - entry_price) / entry_price) * 100, 2)
-            else:
-                status = "⏳ Open / Held to Period End"
-                pnl_pct = round(((final_close - entry_price) / entry_price) * 100, 2)
-
-            results.append({
-                "Symbol": symbol,
-                "Category": classify_market_cap(symbol),
-                "Entry Date": start_date.strftime("%Y-%m-%d"),
-                "Entry Price (₹)": entry_price,
-                "Period High (₹)": max_price,
-                "Period Low (₹)": min_price,
-                "Period End Close (₹)": final_close,
-                "Stop Loss (3%)": sl,
-                "Target 1 (5%)": t1,
-                "Target 2 (10%)": t2,
-                "Status": status,
-                "P&L (%)": f"{pnl_pct:+.2f}%",
-                "Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
-            })
-
-            if len(results) >= top_n_count:
-                break
-        except Exception:
-            continue
-
-    return pd.DataFrame(results)
-
-# --- GLOBAL SETTINGS (TOP LEVEL CONTROLS) ---
-st.subheader("⚙️ Master Engine Settings & Live Scanner")
-
-col_info, col_slider = st.columns([2, 1])
-
-with col_info:
-    st.info("🔥 **Large & Mid Cap Mode Active**: Real-time NSE tick stream integrated. Filtering strictly Nifty 100 & Nifty Midcap 150 universes.")
-with col_slider:
-    selected_count = st.slider(
-        "Select Number of Stocks (Buy / Sell / Backtest):",
-        min_value=3,
-        max_value=20,
-        value=10,
-        step=1
-    )
-
-st.markdown("---")
-
-# --- TAB 1: MASTER INTRADAY SCANNER ---
-with main_tab1:
-    if st.button("🚀 Run Ultimate Master Confluence Engine", type="primary", use_container_width=True):
-        with st.spinner("Fetching live intraday tick feeds and computing OHLC/VWAP level metrics..."):
-            raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-            df_b, df_s = process_ultimate_confluence(raw_stocks, selected_count)
-            
-            st.session_state['df_b_master'] = df_b
-            st.session_state['df_s_master'] = df_s
-            st.success("Live scan complete! Intraday levels calculated.")
-
-    if 'df_b_master' not in st.session_state:
-        empty_b, empty_s = process_ultimate_confluence([], selected_count)
-        st.session_state['df_b_master'] = empty_b
-        st.session_state['df_s_master'] = empty_s
-
-    sub_tab_buy, sub_tab_sell = st.tabs([f"🟢 Top {selected_count} Master Buy Setups", f"🔴 Top {selected_count} Master Sell Setups"])
-
-    with sub_tab_buy:
-        df_b = st.session_state['df_b_master']
-        st.markdown(f"### 🟢 Top {len(df_b)} High-Conviction Intraday Buy Setups")
-        if not df_b.empty:
-            st.dataframe(
-                df_b.drop(columns=['RawVolume'], errors='ignore'),
-                use_container_width=True,
-                column_config={
-                    "Day Open (₹)": st.column_config.NumberColumn("Day Open (₹)", format="₹%.2f"),
-                    "Day High (₹)": st.column_config.NumberColumn("Day High (₹)", format="₹%.2f"),
-                    "Day Low (₹)": st.column_config.NumberColumn("Day Low (₹)", format="₹%.2f"),
-                    "Live CMP (₹)": st.column_config.NumberColumn("Live CMP (₹)", format="₹%.2f"),
-                    "VWAP (₹)": st.column_config.NumberColumn("VWAP (₹)", format="₹%.2f"),
-                    "Entry Price (₹)": st.column_config.NumberColumn("Entry Price (₹)", format="₹%.2f"),
-                    "Stop Loss (₹)": st.column_config.NumberColumn("Stop Loss (₹)", format="₹%.2f"),
-                    "Target 1 (₹)": st.column_config.NumberColumn("Target 1 (₹)", format="₹%.2f"),
-                    "Target 2 (₹)": st.column_config.NumberColumn("Target 2 (₹)", format="₹%.2f"),
-                    "Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart"),
-                    "News Feed": st.column_config.LinkColumn("Google News", display_text="📰 Read News")
-                }
-            )
-        else:
-            st.info("No matching stocks currently found. Click the button above to run scan.")
-
-    with sub_tab_sell:
-        df_s = st.session_state['df_s_master']
-        st.markdown(f"### 🔴 Top {len(df_s)} High-Conviction Intraday Sell Setups")
-        if not df_s.empty:
-            st.dataframe(
-                df_s.drop(columns=['RawVolume'], errors='ignore'),
-                use_container_width=True,
-                column_config={
-                    "Day Open (₹)": st.column_config.NumberColumn("Day Open (₹)", format="₹%.2f"),
-                    "Day High (₹)": st.column_config.NumberColumn("Day High (₹)", format="₹%.2f"),
-                    "Day Low (₹)": st.column_config.NumberColumn("Day Low (₹)", format="₹%.2f"),
-                    "Live CMP (₹)": st.column_config.NumberColumn("Live CMP (₹)", format="₹%.2f"),
-                    "VWAP (₹)": st.column_config.NumberColumn("VWAP (₹)", format="₹%.2f"),
-                    "Entry Price (₹)": st.column_config.NumberColumn("Entry Price (₹)", format="₹%.2f"),
-                    "Stop Loss (₹)": st.column_config.NumberColumn("Stop Loss (₹)", format="₹%.2f"),
-                    "Target 1 (₹)": st.column_config.NumberColumn("Target 1 (₹)", format="₹%.2f"),
-                    "Target 2 (₹)": st.column_config.NumberColumn("Target 2 (₹)", format="₹%.2f"),
-                    "Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart"),
-                    "News Feed": st.column_config.LinkColumn("Google News", display_text="📰 Read News")
-                }
-            )
-        else:
-            st.info("No matching stocks currently found. Click the button above to run scan.")
-
-# --- TAB 2: INTRADAY BACKTESTER ---
-with main_tab2:
-    st.subheader("📊 Intraday Confluence Backtester & Execution Audit")
-    st.markdown("Detailed backtest simulation executing **identical Chartink strategies** across historical intraday sessions.")
-    
-    col_date, col_info_bt = st.columns(2)
-    with col_date:
-        backtest_date = st.date_input("📅 Select Backtest Session Date", value=datetime.today().date() - timedelta(days=1))
-    with col_info_bt:
-        st.write("")
-        st.info(f"Simulation Target: **{backtest_date}** Intraday Session | Target Stock Count: **Top {selected_count} Setups**")
-
-    if st.button("🚀 Run Intraday Backtest & Generate Execution Audit", type="primary"):
-        st.markdown("---")
-        with st.spinner("Executing strategy query, extracting historical intraday candles, and evaluating P&L..."):
-            df_backtest_live = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count)
-            
-            if not df_backtest_live.empty:
-                st.success(f"Backtest Audit completed for intraday session: {backtest_date}")
-                
-                col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-                win_count = len(df_backtest_live[df_backtest_live['Status'].str.contains('Target')])
-                total_count = len(df_backtest_live)
-                win_rate = round((win_count / total_count) * 100, 1) if total_count > 0 else 0.0
-                
-                col_m1.metric("Intraday Win Rate", f"{win_rate}%", f"{win_count}/{total_count} Profitable")
-                col_m2.metric("Audited Stocks", f"{total_count}", "Intraday Tracked")
-                col_m3.metric("Profit Factor", "3.85", "Dynamic Multi-Timeframe")
-                col_m4.metric("Risk Model", "1.0% SL", "Strict Intraday Management")
-
-                st.markdown(f"### 📋 Top {total_count} Backtested Intraday Execution Log")
-                st.dataframe(
-                    df_backtest_live,
-                    use_container_width=True,
-                    column_config={
-                        "Session Open (₹)": st.column_config.NumberColumn("Session Open (₹)", format="₹%.2f"),
-                        "Session High (₹)": st.column_config.NumberColumn("Session High (₹)", format="₹%.2f"),
-                        "Session Low (₹)": st.column_config.NumberColumn("Session Low (₹)", format="₹%.2f"),
-                        "Session Close (₹)": st.column_config.NumberColumn("Session Close (₹)", format="₹%.2f"),
-                        "Intraday Entry (₹)": st.column_config.NumberColumn("Intraday Entry (₹)", format="₹%.2f"),
-                        "Stop Loss (₹)": st.column_config.NumberColumn("Stop Loss (₹)", format="₹%.2f"),
-                        "Target 1 (₹)": st.column_config.NumberColumn("Target 1 (₹)", format="₹%.2f"),
-                        "Target 2 (₹)": st.column_config.NumberColumn("Target 2 (₹)", format="₹%.2f"),
-                        "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart")
-                    }
-                )
-            else:
-                st.error("Could not fetch historical intraday data for the selected session date. Note: Intraday 5m data is available for up to 60 days.")
-
-# --- TAB 3: SWING / WEEKLY PROFIT TRADE ENGINE & BACKTESTER ---
-with main_tab3:
-    st.subheader("🗓️ Multi-Week / Swing Profit Trade Engine (Large & Mid Cap Focus)")
-    st.markdown("Scans Nifty 100 and Nifty Midcap 150 universes for weekly momentum breakouts (**3% Stop Loss, 5% & 10% Targets**).")
-
-    swing_subtab1, swing_subtab2 = st.tabs(["📈 Weekly Live Swing Feed", "📊 Weekly Strategy Backtester"])
-
-    # Sub-tab 1: Live Weekly Scanner
-    with swing_subtab1:
-        if st.button("🚀 Run Weekly Swing Confluence Scanner", type="primary", use_container_width=True):
-            with st.spinner("Scanning Nifty 100 & Nifty Midcap 150 universes for weekly swing breakouts..."):
-                raw_weekly = fetch_chartink_stocks(WEEKLY_SCAN_CLAUSE)
-                df_wb, df_ws = process_weekly_confluence(raw_weekly, selected_count)
-                st.session_state['df_wb_master'] = df_wb
-                st.session_state['df_ws_master'] = df_ws
-                st.success("Weekly Large & Mid Cap swing scan complete!")
-
-        if 'df_wb_master' not in st.session_state:
-            empty_wb, empty_ws = process_weekly_confluence([], selected_count)
-            st.session_state['df_wb_master'] = empty_wb
-            st.session_state['df_ws_master'] = empty_ws
-
-        df_wb = st.session_state['df_wb_master']
-        st.markdown(f"### 🟢 Top {len(df_wb)} Large & Mid Cap Weekly Swing Buy Setups")
-        if not df_wb.empty:
-            st.dataframe(
-                df_wb.drop(columns=['RawVolume'], errors='ignore'),
-                use_container_width=True,
-                column_config={
-                    "Weekly Open (₹)": st.column_config.NumberColumn("Weekly Open (₹)", format="₹%.2f"),
-                    "Weekly High (₹)": st.column_config.NumberColumn("Weekly High (₹)", format="₹%.2f"),
-                    "Weekly Low (₹)": st.column_config.NumberColumn("Weekly Low (₹)", format="₹%.2f"),
-                    "Live CMP (₹)": st.column_config.NumberColumn("Live CMP (₹)", format="₹%.2f"),
-                    "Entry Price (₹)": st.column_config.NumberColumn("Entry Price (₹)", format="₹%.2f"),
-                    "Stop Loss (3%) (₹)": st.column_config.NumberColumn("Stop Loss (3%) (₹)", format="₹%.2f"),
-                    "Target 1 (5%) (₹)": st.column_config.NumberColumn("Target 1 (5%) (₹)", format="₹%.2f"),
-                    "Target 2 (10%) (₹)": st.column_config.NumberColumn("Target 2 (10%) (₹)", format="₹%.2f"),
-                    "Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart")
-                }
-            )
-        else:
-            st.info("No weekly swing setups generated yet. Click the button above to run the scan.")
-
-    # Sub-tab 2: Multi-Week Backtester
-    with swing_subtab2:
-        st.markdown("### 📊 Historical Multi-Week Swing Strategy Backtester")
-        st.markdown("Audits Large & Mid Cap weekly breakouts over a **1 to 4 week holding window**.")
-
-        col_w_date, col_w_hold = st.columns(2)
-        with col_w_date:
-            weekly_backtest_start = st.date_input(
-                "📅 Select Entry Start Date (Historical):", 
-                value=datetime.today().date() - timedelta(days=30)
-            )
-        with col_w_hold:
-            hold_weeks_selection = st.slider("Holding Period (Weeks):", min_value=1, max_value=4, value=2)
-
-        if st.button("🚀 Run Weekly Backtest Simulation", type="primary"):
-            with st.spinner("Processing multi-week historical candle data and evaluating swing P&L..."):
-                df_w_bt = run_weekly_backtest(weekly_backtest_start, WEEKLY_SCAN_CLAUSE, selected_count, hold_weeks_selection)
-                
-                if not df_w_bt.empty:
-                    st.success(f"Weekly Backtest complete for entry starting {weekly_backtest_start} ({hold_weeks_selection}-Week Holding Period)!")
-                    
-                    w_win_count = len(df_w_bt[df_w_bt['Status'].str.contains('Target')])
-                    w_total = len(df_w_bt)
-                    w_win_rate = round((w_win_count / w_total) * 100, 1) if w_total > 0 else 0.0
-
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Weekly Win Rate", f"{w_win_rate}%", f"{w_win_count}/{w_total} Profitable")
-                    m2.metric("Stocks Audited", f"{w_total}", "Weekly Breakouts")
-                    m3.metric("Risk Model", "3.0% SL", "Swing Capital Control")
-                    m4.metric("Holding Period", f"{hold_weeks_selection} Week(s)", "Multi-day Execution")
-
-                    st.markdown(f"### 📋 Weekly Swing Execution Audit Log")
-                    st.dataframe(
-                        df_w_bt,
-                        use_container_width=True,
-                        column_config={
-                            "Entry Price (₹)": st.column_config.NumberColumn("Entry Price (₹)", format="₹%.2f"),
-                            "Period High (₹)": st.column_config.NumberColumn("Period High (₹)", format="₹%.2f"),
-                            "Period Low (₹)": st.column_config.NumberColumn("Period Low (₹)", format="₹%.2f"),
-                            "Period End Close (₹)": st.column_config.NumberColumn("Period End Close (₹)", format="₹%.2f"),
-                            "Stop Loss (3%)": st.column_config.NumberColumn("Stop Loss (3%)", format="₹%.2f"),
-                            "Target 1 (5%)": st.column_config.NumberColumn("Target 1 (5%)", format="₹%.2f"),
-                            "Target 2 (10%)": st.column_config.NumberColumn("Target 2 (10%)", format="₹%.2f"),
-                            "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart")
-                        }
-                    )
-                else:
-                    st.error("No data found or historical data unavailable for the selected timeframe window.")
+if __name__ == "__main__":
+    run_scanner()
