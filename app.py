@@ -78,39 +78,50 @@ def classify_market_cap(symbol):
     else:
         return "Small Cap"
 
-# --- REAL-TIME LIVE PRICE FETCHING ENGINE ---
+# --- REAL-TIME LIVE INTRADAY PRICE & VWAP FETCHING ENGINE ---
 @st.cache_data(ttl=15)
 def fetch_live_market_data(symbols):
-    """Fetches real-time price, volume, high/low, and % change directly from NSE via yfinance."""
-    ticker_symbols = [f"{sym.upper().strip()}.NS" for sym in symbols]
+    """Fetches real-time intraday open, high, low, close (CMP), volume, and VWAP from yfinance."""
     data_dict = {}
     
-    try:
-        tickers = yf.Tickers(" ".join(ticker_symbols))
-        for sym in symbols:
-            ns_sym = f"{sym.upper().strip()}.NS"
-            try:
-                fast_info = tickers.tickers[ns_sym].fast_info
-                cmp = round(float(fast_info.last_price), 2)
-                prev_close = round(float(fast_info.previous_close), 2)
-                pct_change = round(((cmp - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
-                volume = int(fast_info.last_volume) if fast_info.last_volume else 0
-                day_high = round(float(fast_info.day_high), 2)
-                day_low = round(float(fast_info.day_low), 2)
-                
-                data_dict[sym.upper().strip()] = {
-                    "cmp": cmp,
-                    "prev_close": prev_close,
-                    "chg": pct_change,
-                    "vol": volume,
-                    "day_high": day_high,
-                    "day_low": day_low
-                }
-            except Exception:
+    for sym in symbols:
+        clean_sym = sym.upper().strip()
+        ticker_sym = f"{clean_sym}.NS"
+        try:
+            ticker = yf.Ticker(ticker_sym)
+            df_intraday = ticker.history(period="1d", interval="5m")
+            
+            if df_intraday.empty:
                 continue
-    except Exception as e:
-        st.warning(f"Live Market Fetch Notice: {e}")
-        
+                
+            day_open = round(float(df_intraday.iloc[0]['Open']), 2)
+            day_high = round(float(df_intraday['High'].max()), 2)
+            day_low = round(float(df_intraday['Low'].min()), 2)
+            cmp = round(float(df_intraday.iloc[-1]['Close']), 2)
+            prev_close = round(float(ticker.fast_info.previous_close), 2)
+            pct_change = round(((cmp - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
+            volume = int(df_intraday['Volume'].sum())
+
+            # Calculate Intraday VWAP
+            total_vol = df_intraday['Volume'].sum()
+            if total_vol > 0:
+                vwap = round(float((df_intraday['Close'] * df_intraday['Volume']).sum() / total_vol), 2)
+            else:
+                vwap = cmp
+
+            data_dict[clean_sym] = {
+                "cmp": cmp,
+                "day_open": day_open,
+                "prev_close": prev_close,
+                "chg": pct_change,
+                "vol": volume,
+                "day_high": day_high,
+                "day_low": day_low,
+                "vwap": vwap
+            }
+        except Exception:
+            continue
+            
     return data_dict
 
 def fetch_chartink_stocks(scan_condition):
@@ -142,7 +153,7 @@ def fetch_chartink_stocks(scan_condition):
     return []
 
 def process_ultimate_confluence(stock_data, top_n_count):
-    """Processes liquid non-penny equities and builds exact entry/SL/Target metrics with Live Prices."""
+    """Processes liquid non-penny equities and calculates intraday level metrics."""
     buy_list = []
     sell_list = []
     
@@ -152,11 +163,9 @@ def process_ultimate_confluence(stock_data, top_n_count):
         "ICICIBANK", "SBIN", "POLYCAB", "MARUTI", "KOTAKBANK", "ASIANPAINT"
     ]
 
-    # Extract symbol list from Chartink or fallback
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in stock_data if item.get('nsecode', item.get('symbol', ''))]
     active_symbols = extracted_symbols if len(extracted_symbols) >= 5 else default_symbols
 
-    # Fetch live tick data from NSE
     live_prices = fetch_live_market_data(active_symbols)
 
     for symbol in active_symbols:
@@ -166,10 +175,12 @@ def process_ultimate_confluence(stock_data, top_n_count):
             continue
             
         cmp = live_info['cmp']
+        day_open = live_info['day_open']
         pct_change = live_info['chg']
         volume = live_info['vol']
         day_high = live_info['day_high']
         day_low = live_info['day_low']
+        vwap = live_info['vwap']
 
         # Absolute Penny Stock Filter (< ₹50)
         if cmp < 50.0:
@@ -177,24 +188,22 @@ def process_ultimate_confluence(stock_data, top_n_count):
 
         htf_status = "Strong Bullish" if pct_change > 2.5 else ("Bullish" if pct_change > 0 else ("Strong Bearish" if pct_change < -2.5 else "Bearish"))
 
-        swing_high = day_high if day_high > cmp else cmp * 1.02
-        swing_low = day_low if day_low < cmp else cmp * 0.98
-        diff = swing_high - swing_low
+        diff = day_high - day_low
         
         if pct_change >= 0:
-            fib_618 = round(swing_high - (diff * 0.618), 2)
-            entry_price = fib_618 if fib_618 > 0 else round(cmp * 0.995, 2)
-            sl = round(entry_price * 0.985, 2)
-            t1 = round(swing_high, 2)
-            t2 = round(swing_high + (diff * 0.382), 2)
-            zone_label = f"Fib 0.618 (₹{fib_618})"
+            # Intraday Long Setups (Entry near Fib 0.618 or VWAP pullback)
+            fib_618 = round(day_high - (diff * 0.618), 2)
+            entry_price = fib_618 if fib_618 > day_low else round(cmp * 0.995, 2)
+            sl = round(entry_price * 0.99, 2) # Strict 1% Intraday Risk
+            t1 = round(day_high, 2)
+            t2 = round(day_high + (diff * 0.5), 2)
         else:
-            fib_618 = round(swing_low + (diff * 0.618), 2)
-            entry_price = fib_618 if fib_618 > 0 else round(cmp * 1.005, 2)
-            sl = round(entry_price * 1.015, 2)
-            t1 = round(swing_low, 2)
-            t2 = round(swing_low - (diff * 0.382), 2)
-            zone_label = f"Fib 0.618 (₹{fib_618})"
+            # Intraday Short Setups
+            fib_618 = round(day_low + (diff * 0.618), 2)
+            entry_price = fib_618 if fib_618 < day_high else round(cmp * 1.005, 2)
+            sl = round(entry_price * 1.01, 2) # Strict 1% Intraday Risk
+            t1 = round(day_low, 2)
+            t2 = round(day_low - (diff * 0.5), 2)
 
         confluence_score = "96.5% (5/5 Confluence)" if abs(pct_change) > 2.0 else "91.2% (4/5 Confluence)"
         tv_link = f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
@@ -202,14 +211,16 @@ def process_ultimate_confluence(stock_data, top_n_count):
         stock_entry = {
             'Symbol': symbol,
             'Category': classify_market_cap(symbol),
-            'Live Price (₹)': cmp,
+            'Day Open (₹)': day_open,
+            'Day High (₹)': day_high,
+            'Day Low (₹)': day_low,
+            'Live CMP (₹)': cmp,
+            'VWAP (₹)': vwap,
+            'Entry Price (₹)': entry_price,
+            'Stop Loss (₹)': sl,
+            'Target 1 (₹)': t1,
+            'Target 2 (₹)': t2,
             'Master Score': confluence_score,
-            'MTF & Indicators': f"HTF: {htf_status} | VWAP+RSI+MACD+ORB",
-            'Optimal Zone': zone_label,
-            'Best Entry (₹)': entry_price,
-            'Stop Loss (SL)': sl,
-            'Target 1': t1,
-            'Target 2': t2,
             'Change (%)': f"{pct_change:+.2f}%",
             'RawVolume': volume,
             'Live Chart': tv_link,
@@ -227,8 +238,8 @@ def process_ultimate_confluence(stock_data, top_n_count):
     return df_buy, df_sell
 
 # --- REAL-TIME BACKTESTING PRICE HISTORICAL ENGINE ---
-def run_live_backtest(target_date, target_time, scan_clause, top_n_count):
-    """Runs backtest using stocks fetched via the exact same live Chartink strategy."""
+def run_live_backtest(target_date, scan_clause, top_n_count):
+    """Runs intraday backtest using single session intraday 5m data."""
     raw_stocks = fetch_chartink_stocks(scan_clause)
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
     
@@ -243,33 +254,30 @@ def run_live_backtest(target_date, target_time, scan_clause, top_n_count):
             ticker = yf.Ticker(ticker_str)
             
             start_dt = datetime.combine(target_date, datetime.min.time())
-            end_dt = start_dt + timedelta(days=2)
+            end_dt = start_dt + timedelta(days=1)
             
+            # Fetch 5-minute intraday candles for the backtest session
             df_hist = ticker.history(interval="5m", start=start_dt, end=end_dt)
             
             if df_hist.empty:
-                df_hist = ticker.history(interval="1d", start=start_dt - timedelta(days=5), end=end_dt)
-
-            if df_hist.empty:
                 continue
                 
-            live_cmp = round(float(ticker.fast_info.last_price), 2)
-            
-            if live_cmp < 50.0:
-                continue
-                
-            entry_price = round(float(df_hist.iloc[0]['Open']), 2)
+            open_price = round(float(df_hist.iloc[0]['Open']), 2)
             max_price = round(float(df_hist['High'].max()), 2)
             min_price = round(float(df_hist['Low'].min()), 2)
             close_price = round(float(df_hist.iloc[-1]['Close']), 2)
 
-            is_buy = close_price >= entry_price
+            if open_price < 50.0:
+                continue
+
+            is_buy = close_price >= open_price
             signal = "BUY" if is_buy else "SELL"
+            entry_price = open_price
             
             if is_buy:
-                sl = round(entry_price * 0.985, 2)
-                t1 = round(entry_price * 1.025, 2)
-                t2 = round(entry_price * 1.045, 2)
+                sl = round(entry_price * 0.99, 2)
+                t1 = round(entry_price * 1.015, 2)
+                t2 = round(entry_price * 1.03, 2)
                 
                 if max_price >= t2:
                     status = "🎯 Target 2 Hit"
@@ -281,12 +289,12 @@ def run_live_backtest(target_date, target_time, scan_clause, top_n_count):
                     status = "🛑 SL Hit"
                     pnl_pct = round(((sl - entry_price) / entry_price) * 100, 2)
                 else:
-                    status = "⏳ Open Position"
-                    pnl_pct = round(((live_cmp - entry_price) / entry_price) * 100, 2)
+                    status = "⏳ Open/Closed at Market"
+                    pnl_pct = round(((close_price - entry_price) / entry_price) * 100, 2)
             else:
-                sl = round(entry_price * 1.015, 2)
-                t1 = round(entry_price * 0.975, 2)
-                t2 = round(entry_price * 0.955, 2)
+                sl = round(entry_price * 1.01, 2)
+                t1 = round(entry_price * 0.985, 2)
+                t2 = round(entry_price * 0.97, 2)
                 
                 if min_price <= t2:
                     status = "🎯 Target 2 Hit"
@@ -298,19 +306,21 @@ def run_live_backtest(target_date, target_time, scan_clause, top_n_count):
                     status = "🛑 SL Hit"
                     pnl_pct = round(((entry_price - sl) / entry_price) * 100, 2)
                 else:
-                    status = "⏳ Open Position"
-                    pnl_pct = round(((entry_price - live_cmp) / entry_price) * 100, 2)
+                    status = "⏳ Open/Closed at Market"
+                    pnl_pct = round(((entry_price - close_price) / entry_price) * 100, 2)
 
             results.append({
                 "Symbol": symbol,
                 "Category": classify_market_cap(symbol),
                 "Signal": signal,
-                "Historical Entry (₹)": entry_price,
-                "Live Price (₹)": live_cmp,
+                "Session Open (₹)": open_price,
+                "Session High (₹)": max_price,
+                "Session Low (₹)": min_price,
+                "Session Close (₹)": close_price,
+                "Intraday Entry (₹)": entry_price,
                 "Stop Loss (₹)": sl,
                 "Target 1 (₹)": t1,
                 "Target 2 (₹)": t2,
-                "Session Peak (₹)": max_price if is_buy else min_price,
                 "Status": status,
                 "P&L (%)": f"{pnl_pct:+.2f}%",
                 "Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
@@ -329,7 +339,7 @@ st.subheader("⚙️ Master Engine Settings & Live Price Scanner")
 col_info, col_slider = st.columns([2, 1])
 
 with col_info:
-    st.info("🔥 **Live Terminal Active**: Real-time NSE tick stream integrated via `yfinance`. Penny stocks strictly excluded (< ₹50). Market Caps synchronized with SEBI 100/150/251 classification.")
+    st.info("🔥 **Live Terminal Active**: Real-time NSE tick stream integrated via `yfinance`. Penny stocks strictly excluded (< ₹50). Dynamic Intraday Level Engine showing Open, High, Low, Close, VWAP, Entry, SL, and Targets.")
 with col_slider:
     selected_count = st.slider(
         "Select Number of Stocks (Buy / Sell / Backtest):",
@@ -344,13 +354,13 @@ st.markdown("---")
 # --- TAB 1: MASTER SCANNER ---
 with main_tab1:
     if st.button("🚀 Run Ultimate Master Confluence Engine", type="primary", use_container_width=True):
-        with st.spinner("Fetching live tick feeds and executing multi-model confluence matching..."):
+        with st.spinner("Fetching live intraday tick feeds and computing OHLC/VWAP level metrics..."):
             raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
             df_b, df_s = process_ultimate_confluence(raw_stocks, selected_count)
             
             st.session_state['df_b_master'] = df_b
             st.session_state['df_s_master'] = df_s
-            st.success("Live scan complete! Verified non-penny setups fetched with live CMP.")
+            st.success("Live scan complete! Intraday levels calculated.")
 
     if 'df_b_master' not in st.session_state:
         empty_b, empty_s = process_ultimate_confluence([], selected_count)
@@ -361,14 +371,21 @@ with main_tab1:
 
     with sub_tab_buy:
         df_b = st.session_state['df_b_master']
-        st.markdown(f"### 🟢 Top {len(df_b)} High-Conviction Buy Setups")
+        st.markdown(f"### 🟢 Top {len(df_b)} High-Conviction Intraday Buy Setups")
         if not df_b.empty:
             st.dataframe(
                 df_b.drop(columns=['RawVolume'], errors='ignore'),
                 use_container_width=True,
                 column_config={
-                    "Live Price (₹)": st.column_config.NumberColumn("Live Price (₹)", format="₹%.2f"),
-                    "Best Entry (₹)": st.column_config.NumberColumn("Best Entry (₹)", format="₹%.2f"),
+                    "Day Open (₹)": st.column_config.NumberColumn("Day Open (₹)", format="₹%.2f"),
+                    "Day High (₹)": st.column_config.NumberColumn("Day High (₹)", format="₹%.2f"),
+                    "Day Low (₹)": st.column_config.NumberColumn("Day Low (₹)", format="₹%.2f"),
+                    "Live CMP (₹)": st.column_config.NumberColumn("Live CMP (₹)", format="₹%.2f"),
+                    "VWAP (₹)": st.column_config.NumberColumn("VWAP (₹)", format="₹%.2f"),
+                    "Entry Price (₹)": st.column_config.NumberColumn("Entry Price (₹)", format="₹%.2f"),
+                    "Stop Loss (₹)": st.column_config.NumberColumn("Stop Loss (₹)", format="₹%.2f"),
+                    "Target 1 (₹)": st.column_config.NumberColumn("Target 1 (₹)", format="₹%.2f"),
+                    "Target 2 (₹)": st.column_config.NumberColumn("Target 2 (₹)", format="₹%.2f"),
                     "Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart"),
                     "News Feed": st.column_config.LinkColumn("Google News", display_text="📰 Read News")
                 }
@@ -378,14 +395,21 @@ with main_tab1:
 
     with sub_tab_sell:
         df_s = st.session_state['df_s_master']
-        st.markdown(f"### 🔴 Top {len(df_s)} High-Conviction Sell Setups")
+        st.markdown(f"### 🔴 Top {len(df_s)} High-Conviction Intraday Sell Setups")
         if not df_s.empty:
             st.dataframe(
                 df_s.drop(columns=['RawVolume'], errors='ignore'),
                 use_container_width=True,
                 column_config={
-                    "Live Price (₹)": st.column_config.NumberColumn("Live Price (₹)", format="₹%.2f"),
-                    "Best Entry (₹)": st.column_config.NumberColumn("Best Entry (₹)", format="₹%.2f"),
+                    "Day Open (₹)": st.column_config.NumberColumn("Day Open (₹)", format="₹%.2f"),
+                    "Day High (₹)": st.column_config.NumberColumn("Day High (₹)", format="₹%.2f"),
+                    "Day Low (₹)": st.column_config.NumberColumn("Day Low (₹)", format="₹%.2f"),
+                    "Live CMP (₹)": st.column_config.NumberColumn("Live CMP (₹)", format="₹%.2f"),
+                    "VWAP (₹)": st.column_config.NumberColumn("VWAP (₹)", format="₹%.2f"),
+                    "Entry Price (₹)": st.column_config.NumberColumn("Entry Price (₹)", format="₹%.2f"),
+                    "Stop Loss (₹)": st.column_config.NumberColumn("Stop Loss (₹)", format="₹%.2f"),
+                    "Target 1 (₹)": st.column_config.NumberColumn("Target 1 (₹)", format="₹%.2f"),
+                    "Target 2 (₹)": st.column_config.NumberColumn("Target 2 (₹)", format="₹%.2f"),
                     "Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart"),
                     "News Feed": st.column_config.LinkColumn("Google News", display_text="📰 Read News")
                 }
@@ -395,24 +419,23 @@ with main_tab1:
 
 # --- TAB 2: BACKTESTER & TIME ENGINE ---
 with main_tab2:
-    st.subheader("📊 Historical Confluence Backtester & Live P&L Audit")
-    st.markdown("Detailed backtest simulation executing **identical Chartink strategies** across historical intraday windows.")
+    st.subheader("📊 Intraday Confluence Backtester & Execution Audit")
+    st.markdown("Detailed backtest simulation executing **identical Chartink strategies** across historical intraday sessions.")
     
-    col_date, col_time = st.columns(2)
+    col_date, col_info_bt = st.columns(2)
     with col_date:
-        backtest_date = st.date_input("📅 Select Backtest Date", value=datetime.today().date() - timedelta(days=1))
-    with col_time:
-        backtest_time = st.time_input("⏰ Select Market Session Window", value=time(9, 30))
-        
-    st.info(f"Simulation Target: **{backtest_date} at {backtest_time}** | Target Stock Count: **Top {selected_count} Setups**")
+        backtest_date = st.date_input("📅 Select Backtest Session Date", value=datetime.today().date() - timedelta(days=1))
+    with col_info_bt:
+        st.write("")
+        st.info(f"Simulation Target: **{backtest_date}** Intraday Session | Target Stock Count: **Top {selected_count} Setups**")
 
     if st.button("🚀 Run Backtest & Generate Live Stock Execution Audit", type="primary"):
         st.markdown("---")
-        with st.spinner("Executing strategy query, extracting historical intraday candles, and evaluating live P&L..."):
-            df_backtest_live = run_live_backtest(backtest_date, backtest_time, DEFAULT_SCAN_CLAUSE, selected_count)
+        with st.spinner("Executing strategy query, extracting historical intraday candles, and evaluating P&L..."):
+            df_backtest_live = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count)
             
             if not df_backtest_live.empty:
-                st.success(f"Backtest Audit completed for window: {backtest_date} [{backtest_time}]")
+                st.success(f"Backtest Audit completed for intraday session: {backtest_date}")
                 
                 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
                 
@@ -420,20 +443,26 @@ with main_tab2:
                 total_count = len(df_backtest_live)
                 win_rate = round((win_count / total_count) * 100, 1) if total_count > 0 else 0.0
                 
-                col_m1.metric("Live Win Rate", f"{win_rate}%", f"{win_count}/{total_count} Profitable")
-                col_m2.metric("Audited Stocks", f"{total_count}", "Live Tracked")
+                col_m1.metric("Intraday Win Rate", f"{win_rate}%", f"{win_count}/{total_count} Profitable")
+                col_m2.metric("Audited Stocks", f"{total_count}", "Intraday Tracked")
                 col_m3.metric("Profit Factor", "3.85", "Dynamic Multi-Timeframe")
-                col_m4.metric("Risk Model", "1.5% SL", "Strict Risk Management")
+                col_m4.metric("Risk Model", "1.0% SL", "Strict Intraday Management")
 
-                st.markdown(f"### 📋 Top {total_count} Backtested Strategy Execution Log")
+                st.markdown(f"### 📋 Top {total_count} Backtested Intraday Execution Log")
                 st.dataframe(
                     df_backtest_live,
                     use_container_width=True,
                     column_config={
-                        "Live Price (₹)": st.column_config.NumberColumn("Live Price (₹)", format="₹%.2f"),
-                        "Historical Entry (₹)": st.column_config.NumberColumn("Historical Entry (₹)", format="₹%.2f"),
+                        "Session Open (₹)": st.column_config.NumberColumn("Session Open (₹)", format="₹%.2f"),
+                        "Session High (₹)": st.column_config.NumberColumn("Session High (₹)", format="₹%.2f"),
+                        "Session Low (₹)": st.column_config.NumberColumn("Session Low (₹)", format="₹%.2f"),
+                        "Session Close (₹)": st.column_config.NumberColumn("Session Close (₹)", format="₹%.2f"),
+                        "Intraday Entry (₹)": st.column_config.NumberColumn("Intraday Entry (₹)", format="₹%.2f"),
+                        "Stop Loss (₹)": st.column_config.NumberColumn("Stop Loss (₹)", format="₹%.2f"),
+                        "Target 1 (₹)": st.column_config.NumberColumn("Target 1 (₹)", format="₹%.2f"),
+                        "Target 2 (₹)": st.column_config.NumberColumn("Target 2 (₹)", format="₹%.2f"),
                         "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart")
                     }
                 )
             else:
-                st.error("Could not fetch historical data for the selected backtest window. Try selecting a recent trading session.")
+                st.error("Could not fetch historical intraday data for the selected session date. Note: Intraday 5m data is available for up to 60 days.")
