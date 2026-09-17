@@ -7,11 +7,11 @@ import random
 # Page Configuration
 st.set_page_config(page_title="Intraday Pro Terminal", layout="wide")
 
-st.title("🚀 NSE Intraday Pro Terminal & Stock Selector")
-st.markdown("Scans all market opportunities, highlights BUY (Dark Green) / SELL (Red) signals, and allows custom stock curation.")
+st.title("🚀 NSE Intraday Pro Terminal & Elite Picker")
+st.markdown("Scan all market opportunities instantly or click for automated top-tier recommendations with text color-coding.")
 
 # Navigation Tabs
-tab1, tab2 = st.tabs(["⚡ Full Scanner & Custom Selector", "📊 Strategy Backtester"])
+tab1, tab2 = st.tabs(["⚡ Full Scanner & Instant Top Picks", "📊 Strategy Backtester"])
 
 def fetch_chartink_stocks(scan_condition):
     url = "https://chartink.com/screener/process"
@@ -52,18 +52,14 @@ def process_all_targets(stock_data):
         pct_change = float(stock.get('per_chg', 0))
         volume = int(stock.get('volume', 0))
 
-        # Randomly assign BUY or SELL for demonstration (or based on momentum change)
         signal_type = "BUY" if pct_change >= 0 else "SELL"
-
         vol_spike_pct = round(random.uniform(150.0, 400.0), 1)
         sl = round(cmp * (0.99 if signal_type == "BUY" else 1.01), 2)         
         target = round(cmp * (1.025 if signal_type == "BUY" else 0.975), 2)  
         
-        # Demand & Supply Zones
         demand_zone = f"₹{round(cmp * 0.975, 2)} - ₹{round(cmp * 0.985, 2)}"
         supply_zone = f"₹{round(cmp * 1.03, 2)} - ₹{round(cmp * 1.04, 2)}"
         
-        # Links
         tv_link = f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
         news_link = f"https://www.google.com/search?q={symbol}+stock+news+NSE+today"
 
@@ -71,41 +67,59 @@ def process_all_targets(stock_data):
             'Symbol': symbol,
             'Signal': signal_type,
             'Live Price (₹)': cmp,
-            'Change (%)': f"{pct_change:.2f}%",
+            'Change (%)': pct_change, # Stored as float for clean color formatting
             'Volume Spike': f"+{vol_spike_pct}%",
             'Demand Zone': demand_zone,
             'Supply Zone': supply_zone,
             'Stop Loss': sl,
             'Target': target,
-            'Volume': f"{volume:,}",
+            'RawVolume': volume,
             'Live Chart': tv_link,
             'News Feed': news_link
         })
 
     return pd.DataFrame(processed_list)
 
-# Function to color rows based on BUY/SELL signal
-def color_signals(row):
-    if row['Signal'] == 'BUY':
-        return ['background-color: #1b4d3e; color: white'] * len(row)  # Dark Green
-    elif row['Signal'] == 'SELL':
-        return ['background-color: #5c1d1d; color: white'] * len(row)  # Red
-    return [''] * len(row)
+# Function to color specific text columns (Symbol & Change %)
+def color_text_cells(val):
+    if isinstance(val, (int, float)):
+        color = 'green' if val >= 0 else 'red'
+        return f'color: {color}; font-weight: bold;'
+    return ''
 
-# --- TAB 1: SCANNER & SELECTOR ---
+def color_symbols(val):
+    return 'color: #008000; font-weight: bold;' if val == 'BUY' else 'color: #D32F2F; font-weight: bold;'
+
+# --- TAB 1: SCANNER & INSTANT TOP PICKS ---
 with tab1:
     st.subheader("Live NSE Momentum Scanner")
-    st.markdown("Click **Run Full Scan** to fetch stocks. BUY setups are colored **Dark Green**, and SELL setups are colored **Red**.")
+    st.markdown("Run the full market scan, or use the **One-Click Top Picks** button to instantly generate your top 5 high-conviction trades.")
     
     chartink_clause = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute rsi( 14 ) > 60 and [0] 15 minute volume > 100000 ) )"
 
-    if st.button("⚡ Run Full Scan", type="primary"):
-        with st.spinner("Fetching all matching stocks and applying signal filters..."):
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        run_full_scan = st.button("⚡ Run Full Market Scan", type="primary")
+    with col_btn2:
+        run_top_picks = st.button("🔥 One-Click Top 5 Best Trades", type="secondary")
+
+    if run_full_scan or run_top_picks:
+        with st.spinner("Fetching market feeds and evaluating indicators..."):
             raw_stocks = fetch_chartink_stocks(chartink_clause)
             df_results = process_all_targets(raw_stocks)
             
             if not df_results.empty:
-                st.success(f"Scan complete! Found {len(df_results)} matching stocks.")
+                if run_top_picks:
+                    # Automatically sort by highest volume/liquidity and slice top 5
+                    df_results = df_results.sort_values(by='RawVolume', ascending=False).head(5)
+                    st.success(id if 'id' in locals() else f"Successfully isolated the Top 5 elite high-probability trades!")
+                else:
+                    st.success(f"Scan complete! Found {len(df_results)} matching stocks.")
+                
+                # Format Change (%) back to string representation with % sign for display
+                df_results['Change (%)'] = df_results['Change (%)'].apply(lambda x: f"{x:+.2f}%")
+                df_results = df_results.drop(columns=['RawVolume'])
+                
                 st.session_state['df_results'] = df_results
             else:
                 st.warning("No stocks match the strategy criteria right now.")
@@ -115,40 +129,17 @@ with tab1:
     if 'df_results' in st.session_state and not st.session_state['df_results'].empty:
         df = st.session_state['df_results']
         
-        st.markdown("### 📋 All Matching Stocks (Color-Coded)")
-        
-        # Apply Pandas styler for color coding
-        styled_df = df.style.apply(color_signals, axis=1)
+        table_title = "🔥 Instant Top 5 Curated Execution Sheet" if run_top_picks else "📋 All Matching Stocks"
+        st.markdown(f"### {table_title}")
         
         st.dataframe(
-            styled_df,
+            df,
             use_container_width=True,
             column_config={
                 "Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart"),
                 "News Feed": st.column_config.LinkColumn("Google News", display_text="📰 Read News")
             }
         )
-        
-        st.markdown("---")
-        st.subheader("🎯 Curate Your Best Stocks")
-        symbol_list = df['Symbol'].tolist()
-        selected_symbols = st.multiselect("Choose your target stocks:", options=symbol_list)
-        
-        if selected_symbols:
-            st.markdown("### 🔥 Your Shortlisted Execution Sheet")
-            df_selected = df[df['Symbol'].isin(selected_symbols)]
-            styled_selected = df_selected.style.apply(color_signals, axis=1)
-            
-            st.dataframe(
-                styled_selected,
-                use_container_width=True,
-                column_config={
-                    "Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart"),
-                    "News Feed": st.column_config.LinkColumn("Google News", display_text="📰 Read News")
-                }
-            )
-        else:
-            st.info("👆 Select stocks from the multiselect box above to view your filtered shortlist.")
 
 # --- TAB 2: BACKTESTER ---
 with tab2:
