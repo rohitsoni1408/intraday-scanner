@@ -46,17 +46,17 @@ if not st.session_state.authenticated:
                 st.error("Incorrect passcode. Access denied.")
     st.stop()
 
-# --- MAIN APP (Unlocked) ---
+# --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine")
-st.markdown("Filtering high-probability setups across **Intraday Timeframes & Weekly Strong-Buy Confluence Matrix**.")
+st.markdown("Precision Trading Terminal with **Tightened Entry Triggers & Ultra-Small Stop Losses**.")
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
-    "⚡ Intraday Engine (Live & Post-Market)", 
-    "📊 Intraday Time-Based Backtester Engine",
-    "👑 Weekly Strong-Buy Confluence Engine"
+    "⚡ Intraday Engine (Tight Live & Post-Market)", 
+    "📊 Precision Intraday Backtester Engine",
+    "🗓️ Weekly MTF Tight-Risk Strategy Engine"
 ])
 
-# --- EXPANDED LARGE & MID CAP UNIVERSE ---
+# --- UNIVERSE DEFINITION ---
 LARGE_CAPS = {
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HINDUNILVR",
     "AXISBANK", "KOTAKBANK", "SUNPHARMA", "TITAN", "BAJFINANCE", "MARUTI", "NTPC", "POWERGRID", "ASIANPAINT",
@@ -77,7 +77,6 @@ MID_CAPS = {
 }
 
 LARGE_AND_MID_POOL = list(LARGE_CAPS.union(MID_CAPS))
-
 DEFAULT_SCAN_CLAUSE = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 150000 and [0] 15 minute close > 50 ) )"
 
 def classify_market_cap(symbol):
@@ -97,7 +96,7 @@ def is_market_closed():
     market_close = time(15, 30)
     return not (market_open <= now.time() <= market_close)
 
-# --- INDICATOR CALCULATIONS ---
+# --- INDICATORS ---
 def compute_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/period, adjust=False).mean()
@@ -165,7 +164,7 @@ def fetch_chartink_stocks(scan_condition):
         st.error(f"Connection Error: {e}")
     return []
 
-# --- INTRADAY ENGINE ---
+# --- INTRADAY ENGINE (TIGHT SL & REFINED ENTRIES) ---
 def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False):
     buy_list, sell_list = [], []
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in stock_data if item.get('nsecode', item.get('symbol', ''))]
@@ -187,29 +186,39 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
         diff = day_high - day_low
 
         if not closed:
+            # LIVE MARKET: Deep Pullback Entry (78.6% Fib / VWAP Retest) with 0.4% Ultra-Tight SL
             if pct_change >= 0:
-                fib_618 = round(day_high - (diff * 0.618), 2)
-                entry_price = fib_618 if fib_618 > day_low else round(cmp * 0.995, 2)
-                sl, t1, t2 = round(entry_price * 0.99, 2), round(day_high, 2), round(day_high + (diff * 0.5), 2)
+                fib_786 = round(day_high - (diff * 0.786), 2)
+                entry_price = round(max(fib_786, vwap), 2)
+                sl = round(entry_price * 0.996, 2)  # Tight 0.4% Risk
+                t1 = round(entry_price + (entry_price * 0.012), 2) # 1:3 RR Target 1
+                t2 = round(day_high, 2)
             else:
-                fib_618 = round(day_low + (diff * 0.618), 2)
-                entry_price = fib_618 if fib_618 < day_high else round(cmp * 1.005, 2)
-                sl, t1, t2 = round(entry_price * 1.01, 2), round(day_low, 2), round(day_low - (diff * 0.5), 2)
-            execution_type = "LIVE EXECUTION"
+                fib_786 = round(day_low + (diff * 0.786), 2)
+                entry_price = round(min(fib_786, vwap), 2)
+                sl = round(entry_price * 1.004, 2)  # Tight 0.4% Risk
+                t1 = round(entry_price - (entry_price * 0.012), 2) # 1:3 RR Target 1
+                t2 = round(day_low, 2)
+            execution_mode = "LIVE MARKET (TIGHT SL)"
         else:
+            # POST-MARKET / NEXT SESSION: High-confluence Retest Level with 0.6% Micro SL
             if pct_change >= 0:
-                entry_price, sl = round(day_high - (diff * 0.382), 2), round(day_low, 2)
-                t1, t2 = round(day_high + (diff * 0.382), 2), round(day_high + (diff * 0.618), 2)
+                entry_price = round(day_high - (diff * 0.50), 2)  # Mid-point deep retest
+                sl = round(entry_price * 0.994, 2)                # Ultra-tight 0.6% SL
+                t1 = round(day_high, 2)
+                t2 = round(day_high + (diff * 0.382), 2)
             else:
-                entry_price, sl = round(day_low + (diff * 0.382), 2), round(day_high, 2)
-                t1, t2 = round(day_low - (diff * 0.382), 2), round(day_low - (diff * 0.618), 2)
-            execution_type = "NEXT SESSION PLAN"
+                entry_price = round(day_low + (diff * 0.50), 2)   # Mid-point bounce retest
+                sl = round(entry_price * 1.006, 2)                # Ultra-tight 0.6% SL
+                t1 = round(day_low, 2)
+                t2 = round(day_low - (diff * 0.382), 2)
+            execution_mode = "NEXT-SESSION (TIGHT ENTRY)"
 
         stock_entry = {
             'Symbol': symbol, 'Category': classify_market_cap(symbol), 'Session Open (₹)': day_open,
             'Session High (₹)': day_high, 'Session Low (₹)': day_low, 'Last Close/CMP (₹)': cmp,
-            'VWAP (₹)': vwap, 'Next Entry (₹)': entry_price, 'Stop Loss (₹)': sl,
-            'Target 1 (₹)': t1, 'Target 2 (₹)': t2, 'Mode': execution_type,
+            'VWAP (₹)': vwap, 'Tight Entry (₹)': entry_price, 'Small SL (₹)': sl,
+            'Target 1 (₹)': t1, 'Target 2 (₹)': t2, 'Mode': execution_mode,
             'Change (%)': f"{pct_change:+.2f}%", 'RawVolume': volume,
             'Live Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
         }
@@ -223,94 +232,11 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
     df_sell = pd.DataFrame(sell_list).sort_values(by='RawVolume', ascending=False).head(top_n_count) if sell_list else pd.DataFrame()
     return df_buy, df_sell
 
-# --- TIME-BASED INTRADAY BACKTESTER ---
-def run_time_based_backtest(target_date, target_time_str, top_n_count):
-    raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-    extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
-    stock_list = list(dict.fromkeys(extracted_symbols + LARGE_AND_MID_POOL[:25]))[:top_n_count * 2]
+# --- WEEKLY MTF STRATEGY (PRECISION DEMAND/SUPPLY + TIGHT RISK) ---
+@st.cache_data(ttl=300)
+def fetch_weekly_mtf_strategy(symbols):
     results = []
     
-    entry_time_obj = datetime.strptime(target_time_str, "%H:%M").time()
-
-    for symbol in stock_list:
-        try:
-            ticker = yf.Ticker(f"{symbol.strip().upper()}.NS")
-            start_dt = datetime.combine(target_date, datetime.min.time())
-            end_dt = start_dt + timedelta(days=1)
-            df_hist = ticker.history(interval="5m", start=start_dt, end=end_dt)
-
-            if df_hist.empty:
-                continue
-
-            # Time filtering for intraday entry
-            df_hist.index = pd.to_datetime(df_hist.index)
-            candles_at_after = df_hist[df_hist.index.time >= entry_time_obj]
-            if candles_at_after.empty:
-                continue
-
-            entry_row = candles_at_after.iloc[0]
-            entry_time_actual = candles_at_after.index[0].strftime("%H:%M")
-            entry_price = round(float(entry_row['Open']), 2)
-
-            post_entry_candles = candles_at_after.iloc[1:]
-            if post_entry_candles.empty:
-                continue
-
-            max_price = round(float(post_entry_candles['High'].max()), 2)
-            min_price = round(float(post_entry_candles['Low'].min()), 2)
-            close_price = round(float(post_entry_candles.iloc[-1]['Close']), 2)
-
-            if entry_price < 50.0:
-                continue
-
-            # Simple Trend Bias Check based on entry vs day open
-            day_open = float(df_hist.iloc[0]['Open'])
-            is_buy = entry_price >= day_open
-            signal = "BUY" if is_buy else "SELL"
-
-            if is_buy:
-                sl, t1, t2 = round(entry_price * 0.99, 2), round(entry_price * 1.015, 2), round(entry_price * 1.03, 2)
-                if max_price >= t2:
-                    status, pnl = "🎯 Target 2 Hit", round(((t2 - entry_price) / entry_price) * 100, 2)
-                elif max_price >= t1:
-                    status, pnl = "🎯 Target 1 Hit", round(((t1 - entry_price) / entry_price) * 100, 2)
-                elif min_price <= sl:
-                    status, pnl = "🛑 SL Hit", round(((sl - entry_price) / entry_price) * 100, 2)
-                else:
-                    status, pnl = "⏳ Closed at EOD", round(((close_price - entry_price) / entry_price) * 100, 2)
-            else:
-                sl, t1, t2 = round(entry_price * 1.01, 2), round(entry_price * 0.985, 2), round(entry_price * 0.97, 2)
-                if min_price <= t2:
-                    status, pnl = "🎯 Target 2 Hit", round(((entry_price - t2) / entry_price) * 100, 2)
-                elif min_price <= t1:
-                    status, pnl = "🎯 Target 1 Hit", round(((entry_price - t1) / entry_price) * 100, 2)
-                elif max_price >= sl:
-                    status, pnl = "🛑 SL Hit", round(((entry_price - sl) / entry_price) * 100, 2)
-                else:
-                    status, pnl = "⏳ Closed at EOD", round(((entry_price - close_price) / entry_price) * 100, 2)
-
-            results.append({
-                "Symbol": symbol, "Category": classify_market_cap(symbol), "Signal": signal,
-                "Trigger Time": entry_time_actual, "Entry Price (₹)": entry_price,
-                "EOD High (₹)": max_price, "EOD Low (₹)": min_price, "EOD Close (₹)": close_price,
-                "Stop Loss (₹)": sl, "Target 1 (₹)": t1, "Target 2 (₹)": t2,
-                "Status": status, "P&L (%)": f"{pnl:+.2f}%",
-                "Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
-            })
-
-            if len(results) >= top_n_count:
-                break
-        except Exception:
-            continue
-
-    return pd.DataFrame(results)
-
-# --- WEEKLY STRONG-BUY CONFLUENCE ENGINE ---
-@st.cache_data(ttl=300)
-def fetch_weekly_strong_buys(symbols):
-    """Calculates MTF Demand Zones, Breakouts, RSI Divergence, MACD Crossovers, and VWAP for STRONG BUY stocks only."""
-    results = []
-
     for sym in symbols:
         clean_sym = sym.upper().strip()
         ticker_sym = f"{clean_sym}.NS"
@@ -318,7 +244,7 @@ def fetch_weekly_strong_buys(symbols):
             ticker = yf.Ticker(ticker_sym)
             df_weekly = ticker.history(period="2y", interval="1wk")
             df_monthly = ticker.history(period="5y", interval="1mo")
-
+            
             if len(df_weekly) < 30 or len(df_monthly) < 12:
                 continue
 
@@ -326,84 +252,138 @@ def fetch_weekly_strong_buys(symbols):
             if cmp < 50.0:
                 continue
 
-            # 1. Best Demand Zone Calculation (Lowest low of swing bases)
-            w_demand_zone = round(df_weekly['Low'].tail(16).min(), 2)
-            m_demand_zone = round(df_monthly['Low'].tail(8).min(), 2)
-            best_demand_zone = max(w_demand_zone, m_demand_zone)
-            
-            # Resistance/Breakout Zone (Recent peak)
-            resistance_peak = round(df_weekly['High'].iloc[-12:-1].max(), 2)
+            # 1. Precise Multi-Timeframe Demand & Supply Zones (Strict 8-bar base)
+            w_demand = round(df_weekly['Low'].tail(8).min(), 2)
+            w_supply = round(df_weekly['High'].tail(8).max(), 2)
+            m_demand = round(df_monthly['Low'].tail(4).min(), 2)
+            m_supply = round(df_monthly['High'].tail(4).max(), 2)
 
-            # 2. Weekly VWAP Calculation (20-Period Rolling VWAP baseline)
-            total_vol = df_weekly['Volume'].tail(20).sum()
-            weekly_vwap = round(float((df_weekly['Close'].tail(20) * df_weekly['Volume'].tail(20)).sum() / total_vol), 2) if total_vol > 0 else cmp
+            best_demand_zone = max(w_demand, m_demand)
+            best_supply_zone = min(w_supply, m_supply)
 
-            # 3. RSI & RSI Divergence Calculation
+            # 2. Weekly RSI & Divergence
             rsi_series = compute_rsi(df_weekly['Close'], period=14)
-            current_rsi = round(float(rsi_series.iloc[-1]), 2)
+            curr_rsi = round(float(rsi_series.iloc[-1]), 2)
             prev_rsi = round(float(rsi_series.iloc[-5]), 2)
-
+            
             price_low_recent = df_weekly['Low'].iloc[-1]
             price_low_prev = df_weekly['Low'].iloc[-5]
+            price_high_recent = df_weekly['High'].iloc[-1]
+            price_high_prev = df_weekly['High'].iloc[-5]
 
-            # Bullish RSI Divergence: Price lower/equal low, RSI higher low
-            bullish_rsi_div = (price_low_recent <= price_low_prev) and (current_rsi > prev_rsi) and (current_rsi < 65)
+            bullish_rsi_div = (price_low_recent <= price_low_prev) and (curr_rsi > prev_rsi) and (curr_rsi < 60)
+            bearish_rsi_div = (price_high_recent >= price_high_prev) and (curr_rsi < prev_rsi) and (curr_rsi > 40)
 
-            # 4. MACD Crossover Engine
+            # 3. MACD Crossover Engine
             macd, signal, hist = compute_macd(df_weekly['Close'])
             curr_hist = float(hist.iloc[-1])
             prev_hist = float(hist.iloc[-2])
             macd_bullish_cross = (prev_hist <= 0 and curr_hist > 0) or (curr_hist > prev_hist and curr_hist > 0)
+            macd_bearish_cross = (prev_hist >= 0 and curr_hist < 0) or (curr_hist < prev_hist and curr_hist < 0)
 
-            # 5. Breakout Identification
-            is_breakout = (cmp > resistance_peak) or (cmp >= resistance_peak * 0.98 and df_weekly['Volume'].iloc[-1] > df_weekly['Volume'].tail(5).mean())
+            # TIGHTENED EXECUTION RULES: Requires entry within 3% of Demand/Supply Edge & 1.5% Strict SL
+            if bullish_rsi_div or (macd_bullish_cross and cmp <= best_demand_zone * 1.03):
+                setup_type = "🟢 Bullish Demand Zone Bounce"
+                entry = cmp
+                sl = round(best_demand_zone * 0.985, 2)  # Tightened SL (1.5% below demand zone)
+                t1 = round(cmp + ((best_supply_zone - cmp) * 0.4), 2)
+                t2 = round(best_supply_zone, 2)
+            elif bearish_rsi_div or (macd_bearish_cross and cmp >= best_supply_zone * 0.97):
+                setup_type = "🔴 Bearish Supply Zone Rejection"
+                entry = cmp
+                sl = round(best_supply_zone * 1.015, 2)  # Tightened SL (1.5% above supply zone)
+                t1 = round(cmp - ((cmp - best_demand_zone) * 0.4), 2)
+                t2 = round(best_demand_zone, 2)
+            else:
+                setup_type = "🟡 Neutral / No Tight Entry"
+                entry, sl, t1, t2 = cmp, round(cmp * 0.985, 2), round(cmp * 1.05, 2), round(cmp * 1.10, 2)
 
-            # --- STRICT STRONG BUY CONFLUENCE FILTER ---
-            # Criteria: Above VWAP AND near/above Demand Zone + (Breakout OR Bullish RSI Divergence OR Bullish MACD Cross)
-            near_demand = cmp >= best_demand_zone and cmp <= best_demand_zone * 1.18
-            above_vwap = cmp > weekly_vwap
-
-            strong_buy_reasons = []
-            if is_breakout:
-                strong_buy_reasons.append("💥 Resistance Breakout")
-            if bullish_rsi_div:
-                strong_buy_reasons.append("📈 Bullish RSI Divergence")
-            if macd_bullish_cross:
-                strong_buy_reasons.append("⚡ MACD Bullish Cross")
-            if near_demand:
-                strong_buy_reasons.append("🛡️ At Best Demand Zone")
-
-            # Must meet at least 2 key bullish signals + VWAP confirmation for STRONG BUY classification
-            if above_vwap and len(strong_buy_reasons) >= 2:
-                sl = round(best_demand_zone * 0.96, 2)
-                t1 = round(cmp * 1.12, 2)
-                t2 = round(cmp * 1.25, 2)
-                confluence_score = f"🔥 STRONG BUY ({len(strong_buy_reasons)} Factors)"
-
-                results.append({
-                    'Symbol': clean_sym,
-                    'Category': classify_market_cap(clean_sym),
-                    'Weekly Close (₹)': cmp,
-                    'Best Demand Zone (₹)': best_demand_zone,
-                    'Weekly VWAP (₹)': weekly_vwap,
-                    'RSI (14)': current_rsi,
-                    'RSI Divergence': "Bullish Divergence" if bullish_rsi_div else "None",
-                    'MACD Status': "Bullish Cross" if macd_bullish_cross else "Neutral",
-                    'Breakout Status': "Confirmed Breakout" if is_breakout else "Building Base",
-                    'Confluence Details': " + ".join(strong_buy_reasons),
-                    'Rating': confluence_score,
-                    'Entry (₹)': cmp,
-                    'Stop Loss (₹)': sl,
-                    'Target 1 (₹)': t1,
-                    'Target 2 (₹)': t2,
-                    'Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-                })
+            results.append({
+                'Symbol': clean_sym,
+                'Category': classify_market_cap(clean_sym),
+                'Weekly Close (₹)': cmp,
+                'MTF Demand Zone (₹)': best_demand_zone,
+                'MTF Supply Zone (₹)': best_supply_zone,
+                'Weekly RSI (14)': curr_rsi,
+                'RSI Divergence': "Bullish Divergence" if bullish_rsi_div else ("Bearish Divergence" if bearish_rsi_div else "None"),
+                'MACD Crossover': "Bullish Cross" if macd_bullish_cross else ("Bearish Cross" if macd_bearish_cross else "Neutral"),
+                'Strategy Setup': setup_type,
+                'Tight Entry (₹)': entry,
+                'Small SL (₹)': sl,
+                'Target 1 (₹)': t1,
+                'Target 2 (₹)': t2,
+                'Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+            })
         except Exception:
             continue
 
     return pd.DataFrame(results)
 
-# --- GLOBAL CONTROLS ---
+# --- INTRADAY TIGHT BACKTESTER ---
+def run_live_backtest(target_date, scan_clause, top_n_count):
+    raw_stocks = fetch_chartink_stocks(scan_clause)
+    extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
+    stock_list = list(dict.fromkeys(extracted_symbols + LARGE_AND_MID_POOL[:20]))[:top_n_count*2]
+    results = []
+    
+    for symbol in stock_list:
+        try:
+            ticker = yf.Ticker(f"{symbol.strip().upper()}.NS")
+            start_dt = datetime.combine(target_date, datetime.min.time())
+            end_dt = start_dt + timedelta(days=1)
+            df_hist = ticker.history(interval="5m", start=start_dt, end=end_dt)
+            if df_hist.empty:
+                continue
+                
+            open_price = round(float(df_hist.iloc[0]['Open']), 2)
+            max_price = round(float(df_hist['High'].max()), 2)
+            min_price = round(float(df_hist['Low'].min()), 2)
+            close_price = round(float(df_hist.iloc[-1]['Close']), 2)
+
+            if open_price < 50.0:
+                continue
+
+            is_buy = close_price >= open_price
+            signal = "BUY" if is_buy else "SELL"
+            entry_price = open_price
+            
+            if is_buy:
+                sl, t1, t2 = round(entry_price * 0.996, 2), round(entry_price * 1.012, 2), round(entry_price * 1.025, 2)
+                if max_price >= t2:
+                    status, pnl_pct = "🎯 Target 2 Hit", round(((t2 - entry_price) / entry_price) * 100, 2)
+                elif max_price >= t1:
+                    status, pnl_pct = "🎯 Target 1 Hit", round(((t1 - entry_price) / entry_price) * 100, 2)
+                elif min_price <= sl:
+                    status, pnl_pct = "🛑 SL Hit", round(((sl - entry_price) / entry_price) * 100, 2)
+                else:
+                    status, pnl_pct = "⏳ Closed at Market", round(((close_price - entry_price) / entry_price) * 100, 2)
+            else:
+                sl, t1, t2 = round(entry_price * 1.004, 2), round(entry_price * 0.988, 2), round(entry_price * 0.975, 2)
+                if min_price <= t2:
+                    status, pnl_pct = "🎯 Target 2 Hit", round(((entry_price - t2) / entry_price) * 100, 2)
+                elif min_price <= t1:
+                    status, pnl_pct = "🎯 Target 1 Hit", round(((entry_price - t1) / entry_price) * 100, 2)
+                elif max_price >= sl:
+                    status, pnl_pct = "🛑 SL Hit", round(((entry_price - sl) / entry_price) * 100, 2)
+                else:
+                    status, pnl_pct = "⏳ Closed at Market", round(((entry_price - close_price) / entry_price) * 100, 2)
+
+            results.append({
+                "Symbol": symbol, "Category": classify_market_cap(symbol), "Signal": signal,
+                "Session Open (₹)": open_price, "Session High (₹)": max_price, "Session Low (₹)": min_price,
+                "Session Close (₹)": close_price, "Tight Entry (₹)": entry_price, "Small SL (₹)": sl,
+                "Target 1 (₹)": t1, "Target 2 (₹)": t2, "Status": status, "P&L (%)": f"{pnl_pct:+.2f}%",
+                "Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
+            })
+            
+            if len(results) >= top_n_count:
+                break
+        except Exception:
+            continue
+
+    return pd.DataFrame(results)
+
+# --- MASTER CONTROLS ---
 st.subheader("⚙️ Master Engine Controls")
 col_info, col_slider = st.columns([2, 1])
 
@@ -415,18 +395,18 @@ with col_slider:
 
 st.markdown("---")
 
-# --- TAB 1: INTRADAY SCANNER ---
+# --- TAB 1: INTRADAY ENGINE ---
 with main_tab1:
-    st.subheader("⚡ Intraday Master Engine")
+    st.subheader("⚡ Intraday Engine (Tight Entry & Ultra-Small Stop Losses)")
     post_market_toggle = st.checkbox("Force Post-Market Next-Session Calculation Mode", value=is_market_closed())
     
-    if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
-        with st.spinner("Processing intraday metrics..."):
+    if st.button("🚀 Run Intraday Engine Scan", type="primary", use_container_width=True):
+        with st.spinner("Calculating precision entries and micro stop losses..."):
             raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
             df_b, df_s = process_ultimate_confluence(raw_stocks, selected_count, force_post_market=post_market_toggle)
             st.session_state['df_b_master'] = df_b
             st.session_state['df_s_master'] = df_s
-            st.success("Intraday levels generated!")
+            st.success("Tightened intraday setups generated!")
 
     if 'df_b_master' not in st.session_state:
         empty_b, empty_s = process_ultimate_confluence([], selected_count, force_post_market=post_market_toggle)
@@ -441,10 +421,10 @@ with main_tab1:
             st.dataframe(
                 df_b.drop(columns=['RawVolume'], errors='ignore'),
                 use_container_width=True,
-                column_config={"Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Chart")}
+                column_config={"Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart")}
             )
         else:
-            st.info("Click the button above to run intraday scan.")
+            st.info("Click the button above to run the intraday scanner.")
 
     with sub_tab_sell:
         df_s = st.session_state['df_s_master']
@@ -452,67 +432,49 @@ with main_tab1:
             st.dataframe(
                 df_s.drop(columns=['RawVolume'], errors='ignore'),
                 use_container_width=True,
-                column_config={"Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Chart")}
+                column_config={"Live Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart")}
             )
         else:
-            st.info("Click the button above to run intraday scan.")
+            st.info("Click the button above to run the intraday scanner.")
 
-# --- TAB 2: TIME-BASED INTRADAY BACKTESTER ---
+# --- TAB 2: INTRADAY BACKTESTER ---
 with main_tab2:
-    st.subheader("📊 Time-Based Intraday Backtester Engine")
-    st.markdown("Evaluate trade execution outcomes based on specific **Intraday Entry Timestamps**.")
-    
-    col_date, col_time = st.columns(2)
-    with col_date:
-        backtest_date = st.date_input("📅 Select Backtest Session Date", value=datetime.today().date() - timedelta(days=1))
-    with col_time:
-        selected_time = st.selectbox("⏰ Select Intraday Entry Time Window:", ["09:30", "10:00", "10:30", "11:00", "12:00", "13:00"], index=1)
+    st.subheader("📊 Intraday Backtester Engine")
+    backtest_date = st.date_input("📅 Select Backtest Session Date", value=datetime.today().date() - timedelta(days=1))
 
-    if st.button("🚀 Run Time-Based Intraday Backtest", type="primary", use_container_width=True):
-        with st.spinner(f"Fetching intraday 5m candle data for {backtest_date} at {selected_time}..."):
-            df_bt = run_time_based_backtest(backtest_date, selected_time, selected_count)
+    if st.button("🚀 Run Intraday Backtest", type="primary"):
+        with st.spinner("Processing intraday historical candles..."):
+            df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count)
             if not df_bt.empty:
-                st.dataframe(
-                    df_bt,
-                    use_container_width=True,
-                    column_config={
-                        "Entry Price (₹)": st.column_config.NumberColumn(format="₹%.2f"),
-                        "Stop Loss (₹)": st.column_config.NumberColumn(format="₹%.2f"),
-                        "Target 1 (₹)": st.column_config.NumberColumn(format="₹%.2f"),
-                        "Target 2 (₹)": st.column_config.NumberColumn(format="₹%.2f"),
-                        "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Chart")
-                    }
-                )
+                st.dataframe(df_bt, use_container_width=True, column_config={"Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Chart")})
             else:
-                st.error("No intraday candle data available for selected date/time.")
+                st.error("No historical data available for selected date.")
 
-# --- TAB 3: WEEKLY STRONG-BUY ENGINE ---
+# --- TAB 3: WEEKLY MTF STRATEGY ENGINE ---
 with main_tab3:
-    st.subheader("👑 Weekly Strong-Buy Confluence Engine")
-    st.markdown("Filters **ONLY Strong Buy Stocks** matching Demand Zones, Breakouts, Weekly VWAP, RSI Divergence & MACD Crossovers.")
+    st.subheader("🗓️ Weekly MTF Demand/Supply & RSI/MACD Engine (Tightened SL)")
+    st.markdown("Precision strategy utilizing **1.5% Stop Loss buffers** off **MTF Demand/Supply Zones**, combined with **RSI Divergence** and **MACD Crossovers**.")
 
-    if st.button("🚀 Scan Weekly Strong-Buy Stocks", type="primary", use_container_width=True):
-        with st.spinner("Executing multi-timeframe weekly confluence screening..."):
-            df_strong_buys = fetch_weekly_strong_buys(LARGE_AND_MID_POOL)
-            st.session_state['df_strong_buys'] = df_strong_buys
-            st.success("Weekly Strong Buy screening completed!")
+    if st.button("🚀 Run Weekly MTF Strategy Scan", type="primary", use_container_width=True):
+        with st.spinner("Filtering weekly setups for tight-risk entry structures..."):
+            df_mtf = fetch_weekly_mtf_strategy(LARGE_AND_MID_POOL)
+            st.session_state['df_mtf_strategy'] = df_mtf
+            st.success("Weekly MTF tight-risk scanning complete!")
 
-    if 'df_strong_buys' in st.session_state and not st.session_state['df_strong_buys'].empty:
+    if 'df_mtf_strategy' in st.session_state and not st.session_state['df_mtf_strategy'].empty:
         st.dataframe(
-            st.session_state['df_strong_buys'].head(selected_count),
+            st.session_state['df_mtf_strategy'].head(selected_count),
             use_container_width=True,
             column_config={
                 "Weekly Close (₹)": st.column_config.NumberColumn(format="₹%.2f"),
-                "Best Demand Zone (₹)": st.column_config.NumberColumn(format="₹%.2f"),
-                "Weekly VWAP (₹)": st.column_config.NumberColumn(format="₹%.2f"),
-                "Entry (₹)": st.column_config.NumberColumn(format="₹%.2f"),
-                "Stop Loss (₹)": st.column_config.NumberColumn(format="₹%.2f"),
+                "MTF Demand Zone (₹)": st.column_config.NumberColumn(format="₹%.2f"),
+                "MTF Supply Zone (₹)": st.column_config.NumberColumn(format="₹%.2f"),
+                "Tight Entry (₹)": st.column_config.NumberColumn(format="₹%.2f"),
+                "Small SL (₹)": st.column_config.NumberColumn(format="₹%.2f"),
                 "Target 1 (₹)": st.column_config.NumberColumn(format="₹%.2f"),
                 "Target 2 (₹)": st.column_config.NumberColumn(format="₹%.2f"),
                 "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 View MTF Chart")
             }
         )
-    elif 'df_strong_buys' in st.session_state and st.session_state['df_strong_buys'].empty:
-        st.warning("No stocks currently meet the strict 5-factor Strong Buy criteria.")
     else:
-        st.info("Click the button above to run the Weekly Strong Buy Scanner.")
+        st.info("Click the button above to run the Weekly MTF Strategy scanner.")
