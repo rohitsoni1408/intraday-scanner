@@ -1,3 +1,4 @@
+import datetime
 from datetime import datetime, time, timedelta
 from bs4 import BeautifulSoup
 import numpy as np
@@ -59,13 +60,14 @@ if not st.session_state.authenticated:
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 500 Universe)")
 st.markdown(
     "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen"
-    " Symbol Column**, **Intraday RSI Divergence**, and **Optimized 1:3+ RR Weekly MTF Strategy & Backtester**."
+    " Symbol Column**, **Intraday RSI Divergence**, and **Optimized 1:3+ RR Weekly MTF Strategy**."
 )
 
-main_tab1, main_tab2, main_tab3 = st.tabs([
+main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "⚡ Intraday Engine (Tight SL + 5m RSI Divergence)",
     "📊 Precision Intraday Backtester Engine",
-    "🗓️ Weekly MTF Strategy & Historical Backtester",
+    "🗓️ Weekly MTF Strategy Scanner",
+    "📈 Weekly MTF Strategy Backtester",
 ])
 
 
@@ -532,90 +534,118 @@ def fetch_weekly_mtf_strategy(symbols):
     return pd.DataFrame(results)
 
 
-# --- WEEKLY MTF HISTORICAL BACKTEST ENGINE ---
-def run_weekly_mtf_backtest(symbols, start_date, end_date, top_n_count):
-    backtest_results = []
-    
+# --- WEEKLY MTF BACKTESTER ENGINE ---
+def run_weekly_mtf_backtest(symbols, start_date, end_date):
+    results = []
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+
     for sym in symbols:
         clean_sym = sym.upper().strip()
         ticker_sym = f"{clean_sym}.NS"
         try:
             ticker = yf.Ticker(ticker_sym)
             df_weekly = ticker.history(period="5y", interval="1wk")
-            if len(df_weekly) < 35:
+            df_monthly = ticker.history(period="5y", interval="1mo")
+
+            if len(df_weekly) < 30 or len(df_monthly) < 12:
                 continue
-            
-            df_weekly.index = df_weekly.index.tz_localize(None)
-            
-            # Loop through weekly bars within the specified date range
-            for i in range(30, len(df_weekly)):
-                bar_date = df_weekly.index[i].date()
-                if not (start_date <= bar_date <= end_date):
+
+            # Iterate through weekly bars that fall within the selected date range
+            for i in range(30, len(df_weekly) - 1):
+                bar_date = pd.Timestamp(df_weekly.index[i])
+                if not (start_ts <= bar_date <= end_ts):
                     continue
-                
-                sub_df = df_weekly.iloc[:i+1]
-                cmp = round(float(sub_df.iloc[-1]["Close"]), 2)
+
+                sub_df_weekly = df_weekly.iloc[:i+1]
+                cmp = round(float(sub_df_weekly.iloc[-1]["Close"]), 2)
                 if cmp < 50.0:
                     continue
-                
-                weekly_vol_sum = sub_df["Volume"].tail(12).sum()
+
+                weekly_vol_sum = sub_df_weekly["Volume"].tail(12).sum()
                 weekly_vwap = (
-                    round(float((sub_df["Close"].tail(12) * sub_df["Volume"].tail(12)).sum() / weekly_vol_sum), 2)
+                    round(float((sub_df_weekly["Close"].tail(12) * sub_df_weekly["Volume"].tail(12)).sum() / weekly_vol_sum), 2)
                     if weekly_vol_sum > 0 else cmp
                 )
-                vol_poc = compute_volume_profile_poc(sub_df.tail(26))
-                
-                w_demand = round(sub_df["Low"].tail(12).min(), 2)
-                w_supply = round(sub_df["High"].tail(12).max(), 2)
-                
-                rsi_series = compute_rsi(sub_df["Close"], period=14)
+                vol_poc = compute_volume_profile_poc(sub_df_weekly.tail(26))
+
+                w_demand = round(sub_df_weekly["Low"].tail(12).min(), 2)
+                w_supply = round(sub_df_weekly["High"].tail(12).max(), 2)
+                m_demand = round(df_monthly.loc[df_monthly.index <= bar_date]["Low"].tail(6).min(), 2) if not df_monthly.loc[df_monthly.index <= bar_date].empty else w_demand
+                m_supply = round(df_monthly.loc[df_monthly.index <= bar_date]["High"].tail(6).max(), 2) if not df_monthly.loc[df_monthly.index <= bar_date].empty else w_supply
+
+                best_demand_zone = max(w_demand, m_demand)
+                best_supply_zone = min(w_supply, m_supply)
+
+                rsi_series = compute_rsi(sub_df_weekly["Close"], period=14)
                 curr_rsi = round(float(rsi_series.iloc[-1]), 2)
                 prev_rsi = round(float(rsi_series.iloc[-5]), 2)
-                
-                bullish_rsi_div = (sub_df["Low"].iloc[-1] <= sub_df["Low"].iloc[-5]) and (curr_rsi > prev_rsi) and (curr_rsi < 65)
-                _, _, hist = compute_macd(sub_df["Close"])
-                macd_bullish_cross = (float(hist.iloc[-2]) <= 0 and float(hist.iloc[-1]) > 0) or (float(hist.iloc[-1]) > float(hist.iloc[-2]) and float(hist.iloc[-1]) > 0)
-                
-                is_near_demand = (cmp <= w_demand * 1.08) or (cmp <= vol_poc * 1.03) or (cmp >= weekly_vwap * 0.98 and cmp <= weekly_vwap * 1.05)
-                
+
+                price_low_recent = sub_df_weekly["Low"].iloc[-1]
+                price_low_prev = sub_df_weekly["Low"].iloc[-5]
+
+                bullish_rsi_div = (
+                    (price_low_recent <= price_low_prev)
+                    and (curr_rsi > prev_rsi)
+                    and (curr_rsi < 65)
+                )
+
+                macd, signal, hist = compute_macd(sub_df_weekly["Close"])
+                curr_hist = float(hist.iloc[-1])
+                prev_hist = float(hist.iloc[-2])
+                macd_bullish_cross = (prev_hist <= 0 and curr_hist > 0) or (
+                    curr_hist > prev_hist and curr_hist > 0
+                )
+
+                is_near_demand = (
+                    (cmp <= best_demand_zone * 1.08)
+                    or (cmp <= vol_poc * 1.03)
+                    or (cmp >= weekly_vwap * 0.98 and cmp <= weekly_vwap * 1.05)
+                )
+
                 if (bullish_rsi_div or macd_bullish_cross) and is_near_demand:
                     entry = cmp
-                    recent_low = float(sub_df["Low"].iloc[-1])
-                    sl = max(round(recent_low * 0.99, 2), round(entry * 0.965, 2))
+                    recent_weekly_low = float(sub_df_weekly["Low"].iloc[-1])
+                    calculated_sl = round(recent_weekly_low * 0.99, 2)
+                    max_allowed_sl = round(entry * 0.965, 2)
+                    sl = max(calculated_sl, max_allowed_sl)
                     if sl >= entry:
                         sl = round(entry * 0.97, 2)
+
                     risk = entry - sl
                     if risk <= 0:
                         continue
+                    
                     t1 = round(entry + (risk * 1.5), 2)
-                    t2 = round(max(w_supply, entry + (risk * 3.2)), 2)
-                    
-                    # Evaluate outcome using subsequent price action
-                    future_df = df_weekly.iloc[i+1:i+12] # look ahead up to 12 weeks
-                    if future_df.empty:
-                        continue
-                    
-                    max_high = future_df["High"].max()
-                    min_low = future_df["Low"].min()
-                    exit_price = float(future_df["Close"].iloc[-1])
-                    
-                    if min_low <= sl:
-                        status = "🛑 SL Hit"
-                        pnl_val = round(((sl - entry) / entry) * 100, 2)
-                    elif max_high >= t2:
-                        status = "🎯 Target 2 Hit"
-                        pnl_val = round(((t2 - entry) / entry) * 100, 2)
-                    elif max_high >= t1:
-                        status = "🎯 Target 1 Hit"
-                        pnl_val = round(((t1 - entry) / entry) * 100, 2)
-                    else:
-                        status = "⏳ Closed / Active"
-                        pnl_val = round(((exit_price - entry) / entry) * 100, 2)
-                        
-                    backtest_results.append({
+                    t2 = round(max(best_supply_zone, entry + (risk * 3.2)), 2)
+
+                    # Forward test future weekly candles to see outcome
+                    future_df = df_weekly.iloc[i+1:]
+                    status = "⏳ Open / Unresolved"
+                    pnl_val = 0.0
+
+                    if not future_df.empty:
+                        max_future_high = future_df["High"].max()
+                        min_future_low = future_df["Low"].min()
+                        exit_price = float(future_df.iloc[-1]["Close"])
+
+                        if max_future_high >= t2:
+                            status = "🎯 Target 2 Hit"
+                            pnl_val = round(((t2 - entry) / entry) * 100, 2)
+                        elif max_future_high >= t1:
+                            status = "🎯 Target 1 Hit"
+                            pnl_val = round(((t1 - entry) / entry) * 100, 2)
+                        elif min_future_low <= sl:
+                            status = "🛑 Stop Loss Hit"
+                            pnl_val = round(((sl - entry) / entry) * 100, 2)
+                        else:
+                            status = "⏳ Closed at Period End"
+                            pnl_val = round(((exit_price - entry) / entry) * 100, 2)
+
+                    chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+                    results.append({
                         "Symbol": clean_sym,
-                        "Signal": "BUY",
-                        "Entry Date": str(bar_date),
+                        "Entry Date": bar_date.strftime("%Y-%m-%d"),
                         "Buy Price (₹)": f"₹{entry}",
                         "Small SL (₹)": f"₹{sl}",
                         "Target 1 (₹)": f"₹{t1}",
@@ -623,16 +653,12 @@ def run_weekly_mtf_backtest(symbols, start_date, end_date, top_n_count):
                         "Status": status,
                         "P&L (%)": f"{pnl_val:+.2f}%",
                         "RawPnL": pnl_val,
-                        "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+                        "Chart": chart_link,
                     })
-                    break # Take first matching entry per stock in period
         except Exception:
             continue
-            
-    df_bt = pd.DataFrame(backtest_results)
-    if not df_bt.empty:
-        df_bt = df_bt.sort_values(by="Entry Date", ascending=False).head(top_n_count * 3)
-    return df_bt
+
+    return pd.DataFrame(results)
 
 
 # --- BACKTEST ENGINE ---
@@ -778,7 +804,7 @@ with col_info:
     )
 with col_slider:
     selected_count = st.slider(
-        "Select Stock Output Count (Upto 25):",
+        "Select Stock Output Count:",
         min_value=3,
         max_value=25,
         value=10,
@@ -885,76 +911,90 @@ with main_tab2:
     else:
         st.info("Select a date and click the button above to run backtesting.")
 
-# --- TAB 3: WEEKLY MTF STRATEGY & HISTORICAL BACKTESTER ---
+# --- TAB 3: WEEKLY MTF SCANNER ---
 with main_tab3:
     st.subheader(
-        "🗓️ Weekly MTF Strategy & Historical Backtester"
+        "🗓️ Weekly MTF Strategy (Volume Profile POC + VWAP + RSI Div - Tight SL, Min 1:3 RR)"
     )
     st.markdown(
-        "Multi-timeframe strategy scanner and historical backtester combining **Volume Profile Point of Control"
+        "Multi-timeframe scanner combining **Volume Profile Point of Control"
         " (POC)**, **Weekly VWAP**, **Demand Zones**, and **RSI Divergence**"
         " across **Top 500 Nifty stocks** restricted to **Long Setups with Optimized Tight Stop Losses and a Minimum 1:3 Risk:Reward Ratio**."
     )
 
-    mtf_sub_tab1, mtf_sub_tab2 = st.tabs(["🚀 Live Weekly MTF Scanner", "📊 Weekly MTF Historical Backtester"])
-
-    with mtf_sub_tab1:
-        if st.button(
-            "🚀 Run Live Weekly MTF Scan", type="primary", use_container_width=True
+    if st.button(
+        "🚀 Run Weekly MTF Scan", type="primary", use_container_width=True
+    ):
+        with st.spinner(
+            "Analyzing volume profiles, weekly VWAP, and RSI divergences"
+            " across top 500 Nifty stocks..."
         ):
-            with st.spinner(
-                "Analyzing volume profiles, weekly VWAP, and RSI divergences"
-                " across top 500 Nifty stocks..."
-            ):
-                df_mtf = fetch_weekly_mtf_strategy(NIFTY_500_POOL)
-                st.session_state["df_mtf_strategy"] = df_mtf
-                st.success("Weekly MTF scanning complete!")
+            df_mtf = fetch_weekly_mtf_strategy(NIFTY_500_POOL)
+            st.session_state["df_mtf_strategy"] = df_mtf
+            st.success("Weekly MTF scanning complete!")
 
-        if (
-            "df_mtf_strategy" in st.session_state
-            and not st.session_state["df_mtf_strategy"].empty
-        ):
-            df_display = st.session_state["df_mtf_strategy"].head(selected_count)
-            render_native_table(df_display, key_prefix="weekly_mtf")
-        else:
-            st.info(
-                "Click the button above to run the Weekly MTF Strategy scanner."
+    if (
+        "df_mtf_strategy" in st.session_state
+        and not st.session_state["df_mtf_strategy"].empty
+    ):
+        df_display = st.session_state["df_mtf_strategy"].head(selected_count)
+        render_native_table(df_display, key_prefix="weekly_mtf")
+    else:
+        st.info(
+            "Click the button above to run the Weekly MTF Strategy scanner."
+        )
+
+# --- TAB 4: WEEKLY MTF STRATEGY BACKTESTER ---
+with main_tab4:
+    st.subheader("📈 Weekly MTF Strategy Backtester Engine")
+    st.markdown(
+        "Backtest historical Weekly MTF Strategy signals across the Nifty 500 universe within a specified date range."
+    )
+
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        backtest_start_date = st.date_input(
+            "📅 From Date",
+            value=datetime.today().date() - timedelta(days=365),
+        )
+    with col_d2:
+        backtest_end_date = st.date_input(
+            "📅 To Date",
+            value=datetime.today().date(),
+        )
+
+    if st.button("🚀 Run Weekly MTF Backtest", type="primary", use_container_width=True):
+        with st.spinner("Simulating historical Weekly MTF Strategy trades across Nifty 500..."):
+            # Using subset of NIFTY_500_POOL or full pool depending on performance limits (using top 100 for responsive backtesting)
+            df_mtf_bt = run_weekly_mtf_strategy_backtest = run_weekly_mtf_backtest(
+                NIFTY_500_POOL[:100], backtest_start_date, backtest_end_date
             )
+            st.session_state["df_mtf_bt_results"] = df_mtf_bt_strategy_backtest if 'df_mtf_bt_strategy_backtest' in locals() else df_mtf_bt
+            st.success("Weekly MTF backtesting completed!")
 
-    with mtf_sub_tab2:
-        st.markdown("#### 🔍 Historical Backtester for Weekly MTF Strategy")
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            from_date = st.date_input("📅 From Date", value=datetime.today().date() - timedelta(days=180))
-        with col_d2:
-            to_date = st.date_input("📅 To Date", value=datetime.today().date())
+    if (
+        "df_mtf_bt_results" in st.session_state
+        and not st.session_state["df_mtf_bt_results"].empty
+    ):
+        df_mtf_bt = st.session_state["df_mtf_bt_results"].head(selected_count)
 
-        if st.button("🚀 Run Weekly MTF Backtest", type="primary", use_container_width=True):
-            with st.spinner("Scanning historical weekly setups across Nifty 500 universe..."):
-                df_mtf_bt = run_weekly_mtf_backtest(NIFTY_500_POOL, from_date, to_date, selected_count)
-                st.session_state["df_mtf_bt_results"] = df_mtf_bt
-                st.success("Weekly backtesting complete!")
+        total_trades = len(df_mtf_bt)
+        t1_hits = len(df_mtf_bt[df_mtf_bt["Status"].str.contains("Target 1", na=False)])
+        t2_hits = len(df_mtf_bt[df_mtf_bt["Status"].str.contains("Target 2", na=False)])
+        sl_hits = len(df_mtf_bt[df_mtf_bt["Status"].str.contains("Stop Loss", na=False)])
+        wins = t1_hits + t2_hits
+        win_rate = round((wins / total_trades) * 100, 2) if total_trades > 0 else 0.0
+        total_pnl = round(df_mtf_bt["RawPnL"].sum(), 2)
 
-        if "df_mtf_bt_results" in st.session_state and not st.session_state["df_mtf_bt_results"].empty:
-            df_m_bt = st.session_state["df_mtf_bt_results"]
-            
-            tot_trades = len(df_m_bt)
-            t1_h = len(df_m_bt[df_m_bt["Status"].str.contains("Target 1", na=False)])
-            t2_h = len(df_m_bt[df_m_bt["Status"].str.contains("Target 2", na=False)])
-            sl_h = len(df_m_bt[df_m_bt["Status"].str.contains("SL Hit", na=False)])
-            w_cnt = t1_h + t2_h
-            w_rate = round((w_cnt / tot_trades) * 100, 2) if tot_trades > 0 else 0.0
-            cum_pnl = round(df_m_bt["RawPnL"].sum(), 2)
+        st.markdown("#### 📊 Strategy Performance Summary")
+        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+        col_m1.metric("Total Trades", total_trades)
+        col_m2.metric("Win Rate", f"{win_rate}%")
+        col_m3.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
+        col_m4.metric("Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}")
+        col_m5.metric("Stop Losses Hit", f"🛑 {sl_hits}")
+        st.markdown("---")
 
-            st.markdown("#### 📊 Weekly Backtest Performance Summary")
-            bm1, bm2, bm3, bm4, bm5 = st.columns(5)
-            bm1.metric("Total Trades", tot_trades)
-            bm2.metric("Win Rate", f"{w_rate}%")
-            bm3.metric("Cumulative P&L", f"{cum_pnl:+.2f}%")
-            bm4.metric("Targets Hit (T1 / T2)", f"🎯 {t1_h} / 🎯 {t2_h}")
-            bm5.metric("Stop Losses Hit", f"🛑 {sl_h}")
-            st.markdown("---")
-
-            render_native_table(df_m_bt, key_prefix="weekly_backtest_table")
-        else:
-            st.info("Select a date range and click the button above to run historical backtesting for the weekly strategy.")
+        render_native_table(df_mtf_bt, key_prefix="weekly_mtf_backtest")
+    else:
+        st.info("Select your desired date range and click the button above to run the Weekly MTF Backtest.")
