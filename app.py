@@ -67,7 +67,7 @@ st.markdown(
 main_tab1, main_tab2, main_tab3 = st.tabs([
     "⚡ Intraday Engine (Tight SL + 5m RSI Divergence)",
     "📊 Precision Intraday Backtester Engine",
-    "🗓️ Weekly MTF Strategy (Volume Profile + VWAP + RSI Div)",
+    "🗓️ Weekly MTF Strategy (Volume Profile + VWAP + RSI Div - Long Only, 1:3 RR)",
 ])
 
 
@@ -418,7 +418,7 @@ def process_ultimate_confluence(
     return df_buy, df_sell
 
 
-# --- ENHANCED WEEKLY MTF ENGINE (NIFTY 500 TARGETED) ---
+# --- ENHANCED WEEKLY MTF ENGINE (NIFTY 500 TARGETED - LONG ONLY, 1:3 RR) ---
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols):
     results = []
@@ -469,18 +469,11 @@ def fetch_weekly_mtf_strategy(symbols):
 
             price_low_recent = df_weekly["Low"].iloc[-1]
             price_low_prev = df_weekly["Low"].iloc[-5]
-            price_high_recent = df_weekly["High"].iloc[-1]
-            price_high_prev = df_weekly["High"].iloc[-5]
 
             bullish_rsi_div = (
                 (price_low_recent <= price_low_prev)
                 and (curr_rsi > prev_rsi)
                 and (curr_rsi < 65)
-            )
-            bearish_rsi_div = (
-                (price_high_recent >= price_high_prev)
-                and (curr_rsi < prev_rsi)
-                and (curr_rsi > 35)
             )
 
             macd, signal, hist = compute_macd(df_weekly["Close"])
@@ -488,9 +481,6 @@ def fetch_weekly_mtf_strategy(symbols):
             prev_hist = float(hist.iloc[-2])
             macd_bullish_cross = (prev_hist <= 0 and curr_hist > 0) or (
                 curr_hist > prev_hist and curr_hist > 0
-            )
-            macd_bearish_cross = (prev_hist >= 0 and curr_hist < 0) or (
-                curr_hist < prev_hist and curr_hist < 0
             )
 
             is_near_demand = (
@@ -503,58 +493,35 @@ def fetch_weekly_mtf_strategy(symbols):
             )
 
             if (bullish_rsi_div or macd_bullish_cross) and is_near_demand:
-                is_buy = True
                 setup_type = "STRONG BUY (Demand + Vol POC + RSI Div)"
                 entry = cmp
                 sl = round(min(best_demand_zone, vol_poc) * 0.985, 2)
-                t1 = round(cmp + ((best_supply_zone - cmp) * 0.5), 2)
-                t2 = round(best_supply_zone, 2)
-            elif (bearish_rsi_div or macd_bearish_cross) and (
-                cmp >= best_supply_zone * 0.93
-            ):
-                is_buy = False
-                setup_type = "STRONG SELL (Supply Rejection + Bear Div)"
-                entry = cmp
-                sl = round(max(best_supply_zone, vol_poc) * 1.015, 2)
-                t1 = round(cmp - ((cmp - best_demand_zone) * 0.5), 2)
-                t2 = round(best_demand_zone, 2)
+                
+                # Enforce minimum Risk:Reward Ratio of 1:3
+                risk = entry - sl
+                if risk <= 0:
+                    continue
+                t1 = round(entry + (risk * 1.5), 2)
+                t2 = round(entry + (risk * 3.0), 2)
             else:
                 continue
 
-            if is_buy:
-                results.append({
-                    "Symbol": clean_sym,
-                    "Signal": "BUY",
-                    "Weekly Close (₹)": f"₹{cmp}",
-                    "Weekly VWAP (₹)": f"₹{weekly_vwap}",
-                    "Volume POC (₹)": f"₹{vol_poc}",
-                    "Demand Zone (₹)": f"₹{best_demand_zone}",
-                    "Supply Zone (₹)": f"₹{best_supply_zone}",
-                    "Weekly RSI": curr_rsi,
-                    "Strategy Setup": setup_type,
-                    "Tight Entry (₹)": f"₹{entry}",
-                    "Small SL (₹)": f"₹{sl}",
-                    "Target 1 (₹)": f"₹{t1}",
-                    "Target 2 (₹)": f"₹{t2}",
-                    "Chart": chart_link,
-                })
-            else:
-                results.append({
-                    "Symbol": clean_sym,
-                    "Signal": "SELL",
-                    "Weekly Close (₹)": f"₹{cmp}",
-                    "Weekly VWAP (₹)": f"₹{weekly_vwap}",
-                    "Volume POC (₹)": f"₹{vol_poc}",
-                    "Demand Zone (₹)": f"₹{best_demand_zone}",
-                    "Supply Zone (₹)": f"₹{best_supply_zone}",
-                    "Weekly RSI": curr_rsi,
-                    "Strategy Setup": setup_type,
-                    "Tight Entry (₹)": f"₹{entry}",
-                    "Small SL (₹)": f"₹{sl}",
-                    "Target 1 (₹)": f"₹{t1}",
-                    "Target 2 (₹)": f"₹{t2}",
-                    "Chart": chart_link,
-                })
+            results.append({
+                "Symbol": clean_sym,
+                "Signal": "BUY",
+                "Weekly Close (₹)": f"₹{cmp}",
+                "Weekly VWAP (₹)": f"₹{weekly_vwap}",
+                "Volume POC (₹)": f"₹{vol_poc}",
+                "Demand Zone (₹)": f"₹{best_demand_zone}",
+                "Supply Zone (₹)": f"₹{best_supply_zone}",
+                "Weekly RSI": curr_rsi,
+                "Strategy Setup": setup_type,
+                "Tight Entry (₹)": f"₹{entry}",
+                "Small SL (₹)": f"₹{sl}",
+                "Target 1 (₹)": f"₹{t1}",
+                "Target 2 (₹)": f"₹{t2}",
+                "Chart": chart_link,
+            })
         except Exception:
             continue
 
@@ -811,15 +778,15 @@ with main_tab2:
     else:
         st.info("Select a date and click the button above to run backtesting.")
 
-# --- TAB 3: WEEKLY MTF ENGINE (NIFTY 500) ---
+# --- TAB 3: WEEKLY MTF ENGINE (NIFTY 500 - LONG ONLY, 1:3 RR) ---
 with main_tab3:
     st.subheader(
-        "🗓️ Weekly MTF Strategy (Volume Profile POC + VWAP + RSI Div)"
+        "🗓️ Weekly MTF Strategy (Volume Profile POC + VWAP + RSI Div - Long Only)"
     )
     st.markdown(
         "Multi-timeframe scanner combining **Volume Profile Point of Control"
-        " (POC)**, **Weekly VWAP**, **Demand/Supply Zones**, and **RSI"
-        " Divergence** across **Top 500 Nifty stocks**."
+        " (POC)**, **Weekly VWAP**, **Demand Zones**, and **RSI Divergence**"
+        " across **Top 500 Nifty stocks** restricted to **Long Setups with a Minimum 1:3 Risk:Reward Ratio**."
     )
 
     if st.button(
