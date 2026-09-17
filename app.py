@@ -9,7 +9,7 @@ from datetime import datetime, time, timedelta
 # Page Configuration
 st.set_page_config(page_title="Ultimate Multi-Timeframe Confluence Terminal", layout="wide")
 
-# --- CUSTOM UI STYLING & COLOR CODES ---
+# --- CUSTOM UI STYLING & SCROLLBAR CONTROL ---
 st.markdown("""
 <style>
     .main { background-color: #0e1117; }
@@ -26,6 +26,50 @@ st.markdown("""
     }
     .text-buy { color: #00E676; font-weight: bold; }
     .text-sell { color: #FF5252; font-weight: bold; }
+    
+    /* Table scroll container for maintaining scrolling bars */
+    .table-container {
+        width: 100%;
+        max-height: 550px;
+        overflow-x: auto;
+        overflow-y: auto;
+        border: 1px solid #262730;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+    }
+    table.custom-table {
+        width: 100%;
+        border-collapse: collapse;
+        color: #ffffff;
+        font-family: inherit;
+        font-size: 14px;
+    }
+    table.custom-table th {
+        position: sticky;
+        top: 0;
+        background-color: #1e222d;
+        padding: 10px;
+        text-align: left;
+        border-bottom: 2px solid #363a45;
+        z-index: 10;
+    }
+    table.custom-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #262730;
+        white-space: nowrap;
+    }
+    a.chart-btn {
+        background-color: #2962ff;
+        color: #ffffff !important;
+        padding: 4px 10px;
+        border-radius: 4px;
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    a.chart-btn:hover {
+        background-color: #1e53e5;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -50,7 +94,7 @@ if not st.session_state.authenticated:
 
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (NSE 750 Universe)")
-st.markdown("Trading Terminal featuring **Intraday RSI Divergence**, **Weekly Volume Profile & VWAP MTF Confluence**, and **Dynamic Red/Green Visual Styling**.")
+st.markdown("Trading Terminal featuring **Direct TradingView Chart Links**, **Intraday RSI Divergence**, **Weekly Volume Profile & VWAP Confluence**, and **Dynamic Red/Green Styling**.")
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
     "⚡ Intraday Engine (Tight SL + 5m RSI Divergence)", 
@@ -61,11 +105,7 @@ main_tab1, main_tab2, main_tab3 = st.tabs([
 # --- DYNAMIC TOP NSE 750 UNIVERSE FETCH ENGINE ---
 @st.cache_data(ttl=86400)
 def load_nse_750_symbols():
-    """Fetches and merges symbols from top Indian indices to build NSE 750 universe."""
     symbols = set()
-    indices = ["NIFTY 50", "NIFTY NEXT 50", "NIFTY MIDCAP 150", "NIFTY SMALLCAP 250", "NIFTY MICROCAP 250"]
-    
-    # Fallback default universe list covering primary active large/mid/small cap stocks
     core_symbols = [
         "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HINDUNILVR",
         "AXISBANK", "KOTAKBANK", "SUNPHARMA", "TITAN", "BAJFINANCE", "MARUTI", "NTPC", "POWERGRID", "ASIANPAINT",
@@ -108,7 +148,6 @@ def compute_macd(series, fast=12, slow=26, signal=9):
     return macd, signal_line, hist
 
 def compute_volume_profile_poc(df, bins=15):
-    """Calculates Point of Control (POC) price level using Volume Profile histogram."""
     if df.empty or 'Volume' not in df.columns:
         return round(float(df['Close'].iloc[-1]), 2)
     price_min = df['Low'].min()
@@ -145,7 +184,6 @@ def fetch_live_market_data(symbols):
             total_vol = df_intraday['Volume'].sum()
             vwap = round(float((df_intraday['Close'] * df_intraday['Volume']).sum() / total_vol), 2) if total_vol > 0 else cmp
 
-            # Intraday 5m RSI Divergence
             rsi_5m = compute_rsi(df_intraday['Close'], period=14)
             curr_rsi = float(rsi_5m.iloc[-1])
             prev_rsi = float(rsi_5m.iloc[-6])
@@ -184,7 +222,32 @@ def fetch_chartink_stocks(scan_condition):
         st.error(f"Connection Error: {e}")
     return []
 
-# --- INTRADAY ENGINE (WITH TIGHT ENTRIES & COLOR-CODED OUTPUT) ---
+def build_custom_html_table(df):
+    """Renders HTML Table inside a scroll container with direct external target links."""
+    if df.empty:
+        return "<p>No stocks found matching the current criteria.</p>"
+    
+    headers = "".join([f"<th>{col}</th>" for col in df.columns if col != 'RawVolume' and col != 'RawPnL'])
+    rows = ""
+    for _, row in df.iterrows():
+        row_cells = ""
+        for col in df.columns:
+            if col in ['RawVolume', 'RawPnL']:
+                continue
+            row_cells += f"<td>{row[col]}</td>"
+        rows += f"<tr>{row_cells}</tr>"
+
+    html_code = f"""
+    <div class="table-container">
+        <table class="custom-table">
+            <thead><tr>{headers}</tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+    </div>
+    """
+    return html_code
+
+# --- INTRADAY ENGINE ---
 def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False):
     buy_list, sell_list = [], []
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in stock_data if item.get('nsecode', item.get('symbol', ''))]
@@ -219,7 +282,6 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
                 sl = round(entry_price * 1.004, 2)
                 t1 = round(entry_price - (entry_price * 0.012), 2)
                 t2 = round(day_low, 2)
-            execution_mode = "LIVE MARKET (TIGHT SL)"
         else:
             if pct_change >= 0:
                 entry_price = round(day_high - (diff * 0.50), 2)
@@ -231,9 +293,7 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
                 sl = round(entry_price * 1.006, 2)
                 t1 = round(day_low, 2)
                 t2 = round(day_low - (diff * 0.382), 2)
-            execution_mode = "NEXT-SESSION (TIGHT ENTRY)"
 
-        # --- RED & GREEN FLAGS ---
         red_reasons, green_reasons = [], []
         if abs(pct_change) > 4.5: red_reasons.append("Extended Move (>4.5%)")
         if volume < 200000: red_reasons.append("Low Volume Liquidity")
@@ -242,8 +302,9 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
         if rsi_bull_div and pct_change >= 0: green_reasons.append("5m RSI Bullish Divergence")
         if rsi_bear_div and pct_change < 0: green_reasons.append("5m RSI Bearish Divergence")
 
+        chart_link = f'<a href="https://in.tradingview.com/chart/?symbol=NSE:{symbol}" target="_blank" class="chart-btn">📈 Open Chart</a>'
+
         if pct_change >= 0:
-            # BUY formatting: GREEN TEXT
             status_tag = f"<span class='text-buy'>🟢 BUY ({', '.join(green_reasons) if green_reasons else 'STRONG MOMENTUM'})</span>"
             stock_entry = {
                 'Symbol': f"<span class='text-buy'>{symbol}</span>",
@@ -260,11 +321,10 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
                 'Target 2 (₹)': f"<span class='text-buy'>₹{t2}</span>",
                 'Change (%)': f"<span class='text-buy'>{pct_change:+.2f}%</span>",
                 'RawVolume': volume,
-                'Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
+                'Chart': chart_link
             }
             buy_list.append(stock_entry)
         else:
-            # SELL formatting: RED TEXT
             status_tag = f"<span class='text-sell'>🔴 SELL ({', '.join(red_reasons) if red_reasons else 'WEAK STRUCTURE'})</span>"
             stock_entry = {
                 'Symbol': f"<span class='text-sell'>{symbol}</span>",
@@ -281,7 +341,7 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
                 'Target 2 (₹)': f"<span class='text-sell'>₹{t2}</span>",
                 'Change (%)': f"<span class='text-sell'>{pct_change:+.2f}%</span>",
                 'RawVolume': volume,
-                'Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
+                'Chart': chart_link
             }
             sell_list.append(stock_entry)
 
@@ -289,7 +349,7 @@ def process_ultimate_confluence(stock_data, top_n_count, force_post_market=False
     df_sell = pd.DataFrame(sell_list).sort_values(by='RawVolume', ascending=False).head(top_n_count) if sell_list else pd.DataFrame()
     return df_buy, df_sell
 
-# --- ENHANCED WEEKLY MTF ENGINE (VOLUME PROFILE + VWAP + RSI DIV) ---
+# --- ENHANCED WEEKLY MTF ENGINE ---
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols):
     results = []
@@ -309,14 +369,10 @@ def fetch_weekly_mtf_strategy(symbols):
             if cmp < 50.0:
                 continue
 
-            # 1. Weekly VWAP Calculation
             weekly_vol_sum = df_weekly['Volume'].tail(12).sum()
             weekly_vwap = round(float((df_weekly['Close'].tail(12) * df_weekly['Volume'].tail(12)).sum() / weekly_vol_sum), 2) if weekly_vol_sum > 0 else cmp
-
-            # 2. Volume Profile Point of Control (POC)
             vol_poc = compute_volume_profile_poc(df_weekly.tail(26))
 
-            # 3. Demand/Supply Zones
             w_demand = round(df_weekly['Low'].tail(12).min(), 2)
             w_supply = round(df_weekly['High'].tail(12).max(), 2)
             m_demand = round(df_monthly['Low'].tail(6).min(), 2)
@@ -325,7 +381,6 @@ def fetch_weekly_mtf_strategy(symbols):
             best_demand_zone = max(w_demand, m_demand)
             best_supply_zone = min(w_supply, m_supply)
 
-            # 4. Weekly RSI Divergence
             rsi_series = compute_rsi(df_weekly['Close'], period=14)
             curr_rsi = round(float(rsi_series.iloc[-1]), 2)
             prev_rsi = round(float(rsi_series.iloc[-5]), 2)
@@ -338,16 +393,15 @@ def fetch_weekly_mtf_strategy(symbols):
             bullish_rsi_div = (price_low_recent <= price_low_prev) and (curr_rsi > prev_rsi) and (curr_rsi < 65)
             bearish_rsi_div = (price_high_recent >= price_high_prev) and (curr_rsi < prev_rsi) and (curr_rsi > 35)
 
-            # 5. MACD Crossover Engine
             macd, signal, hist = compute_macd(df_weekly['Close'])
             curr_hist = float(hist.iloc[-1])
             prev_hist = float(hist.iloc[-2])
             macd_bullish_cross = (prev_hist <= 0 and curr_hist > 0) or (curr_hist > prev_hist and curr_hist > 0)
             macd_bearish_cross = (prev_hist >= 0 and curr_hist < 0) or (curr_hist < prev_hist and curr_hist < 0)
 
-            # RELAXED HIGH-PROBABILITY WEEKLY BUY TRIGGER (Prevents missing Strong Buys)
             is_near_demand = (cmp <= best_demand_zone * 1.08) or (cmp <= vol_poc * 1.03) or (cmp >= weekly_vwap * 0.98 and cmp <= weekly_vwap * 1.05)
-            
+            chart_link = f'<a href="https://in.tradingview.com/chart/?symbol=NSE:{clean_sym}" target="_blank" class="chart-btn">📈 Open Chart</a>'
+
             if (bullish_rsi_div or macd_bullish_cross) and is_near_demand:
                 is_buy = True
                 setup_type = "STRONG BUY (Demand + Vol POC + RSI Div)"
@@ -363,7 +417,7 @@ def fetch_weekly_mtf_strategy(symbols):
                 t1 = round(cmp - ((cmp - best_demand_zone) * 0.5), 2)
                 t2 = round(best_demand_zone, 2)
             else:
-                continue  # Skip neutral stocks to display only actionable setups
+                continue
 
             if is_buy:
                 results.append({
@@ -380,7 +434,7 @@ def fetch_weekly_mtf_strategy(symbols):
                     'Small SL (₹)': f"<span class='text-buy'>₹{sl}</span>",
                     'Target 1 (₹)': f"<span class='text-buy'>₹{t1}</span>",
                     'Target 2 (₹)': f"<span class='text-buy'>₹{t2}</span>",
-                    'Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+                    'Chart': chart_link
                 })
             else:
                 results.append({
@@ -397,14 +451,14 @@ def fetch_weekly_mtf_strategy(symbols):
                     'Small SL (₹)': f"<span class='text-sell'>₹{sl}</span>",
                     'Target 1 (₹)': f"<span class='text-sell'>₹{t1}</span>",
                     'Target 2 (₹)': f"<span class='text-sell'>₹{t2}</span>",
-                    'Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+                    'Chart': chart_link
                 })
         except Exception:
             continue
 
     return pd.DataFrame(results)
 
-# --- BACKTEST ENGINE WITH COLOR-CODED RESULTS ---
+# --- BACKTEST ENGINE ---
 def run_live_backtest(target_date, scan_clause, top_n_count):
     raw_stocks = fetch_chartink_stocks(scan_clause)
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
@@ -428,6 +482,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
 
             is_buy = close_price >= open_price
             entry_price = open_price
+            chart_link = f'<a href="https://in.tradingview.com/chart/?symbol=NSE:{symbol}" target="_blank" class="chart-btn">📈 Open Chart</a>'
             
             if is_buy:
                 sl, t1, t2 = round(entry_price * 0.996, 2), round(entry_price * 1.012, 2), round(entry_price * 1.025, 2)
@@ -446,7 +501,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
                     "Status": f"<span class='text-buy'>{status}</span>",
                     "P&L (%)": f"<span class='text-buy'>{pnl_val:+.2f}%</span>",
                     "RawPnL": pnl_val,
-                    "Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
+                    "Chart": chart_link
                 })
             else:
                 sl, t1, t2 = round(entry_price * 1.004, 2), round(entry_price * 0.988, 2), round(entry_price * 0.975, 2)
@@ -465,7 +520,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
                     "Status": f"<span class='text-sell'>{status}</span>",
                     "P&L (%)": f"<span class='text-sell'>{pnl_val:+.2f}%</span>",
                     "RawPnL": pnl_val,
-                    "Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
+                    "Chart": chart_link
                 })
             
             if len(results) >= top_n_count: break
@@ -509,14 +564,14 @@ with main_tab1:
     with sub_tab_buy:
         df_b = st.session_state['df_b_master']
         if not df_b.empty:
-            st.write(df_b.drop(columns=['RawVolume'], errors='ignore').to_html(escape=False, index=False), unsafe_allow_html=True)
+            st.markdown(build_custom_html_table(df_b), unsafe_allow_html=True)
         else:
             st.info("Click the button above to run the intraday scanner.")
 
     with sub_tab_sell:
         df_s = st.session_state['df_s_master']
         if not df_s.empty:
-            st.write(df_s.drop(columns=['RawVolume'], errors='ignore').to_html(escape=False, index=False), unsafe_allow_html=True)
+            st.markdown(build_custom_html_table(df_s), unsafe_allow_html=True)
         else:
             st.info("Click the button above to run the intraday scanner.")
 
@@ -550,7 +605,7 @@ with main_tab2:
         col_m5.metric("Stop Losses Hit", f"🛑 {sl_hits}")
         st.markdown("---")
 
-        st.write(df_bt.drop(columns=['RawPnL'], errors='ignore').to_html(escape=False, index=False), unsafe_allow_html=True)
+        st.markdown(build_custom_html_table(df_bt), unsafe_allow_html=True)
     else:
         st.info("Select a date and click the button above to run backtesting.")
 
@@ -567,6 +622,6 @@ with main_tab3:
 
     if 'df_mtf_strategy' in st.session_state and not st.session_state['df_mtf_strategy'].empty:
         df_display = st.session_state['df_mtf_strategy'].head(selected_count)
-        st.write(df_display.to_html(escape=False, index=False), unsafe_allow_html=True)
+        st.markdown(build_custom_html_table(df_display), unsafe_allow_html=True)
     else:
         st.info("Click the button above to run the Weekly MTF Strategy scanner.")
