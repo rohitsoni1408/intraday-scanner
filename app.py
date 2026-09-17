@@ -65,6 +65,9 @@ MID_CAPS = {
     "MAXHEALTH", "LUPIN", "AUROPHARMA", "BOSCHLTD", "BHARATFORG", "PIIND", "SRF", "IDEA", "YESBANK", "IDFCFIRSTB"
 }
 
+# --- DEFAULT SCAN CLAUSE ---
+DEFAULT_SCAN_CLAUSE = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 150000 and [0] 15 minute close > 50 ) )"
+
 def classify_market_cap(symbol):
     """Accurately classifies Market Cap as per NSE / SEBI Top 100/150/251+ frameworks."""
     sym = symbol.upper().strip()
@@ -224,8 +227,14 @@ def process_ultimate_confluence(stock_data, top_n_count):
     return df_buy, df_sell
 
 # --- REAL-TIME BACKTESTING PRICE HISTORICAL ENGINE ---
-def run_live_backtest(target_date, target_time, stock_list):
-    """Backtests strategies against exact historical intraday price candles from Yahoo Finance."""
+def run_live_backtest(target_date, target_time, scan_clause, top_n_count):
+    """Runs backtest using stocks fetched via the exact same live Chartink strategy."""
+    raw_stocks = fetch_chartink_stocks(scan_clause)
+    extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
+    
+    default_candidates = ["DIXON", "BHARTIARTL", "PERSISTENT", "POLYCAB", "SBIN", "RELIANCE", "TCS", "INFY", "LT", "HDFCBANK"]
+    stock_list = extracted_symbols[:top_n_count*2] if len(extracted_symbols) >= 5 else default_candidates[:top_n_count*2]
+    
     results = []
     
     for symbol in stock_list:
@@ -233,7 +242,6 @@ def run_live_backtest(target_date, target_time, stock_list):
             ticker_str = f"{symbol.strip().upper()}.NS"
             ticker = yf.Ticker(ticker_str)
             
-            # Request intraday 5m data if date is recent (within 60 days), else daily data
             start_dt = datetime.combine(target_date, datetime.min.time())
             end_dt = start_dt + timedelta(days=2)
             
@@ -245,16 +253,16 @@ def run_live_backtest(target_date, target_time, stock_list):
             if df_hist.empty:
                 continue
                 
-            # Current Live Price
             live_cmp = round(float(ticker.fast_info.last_price), 2)
             
-            # Entry candle computation
+            if live_cmp < 50.0:
+                continue
+                
             entry_price = round(float(df_hist.iloc[0]['Open']), 2)
             max_price = round(float(df_hist['High'].max()), 2)
             min_price = round(float(df_hist['Low'].min()), 2)
             close_price = round(float(df_hist.iloc[-1]['Close']), 2)
 
-            # Define signal direction based on initial trend
             is_buy = close_price >= entry_price
             signal = "BUY" if is_buy else "SELL"
             
@@ -307,34 +315,37 @@ def run_live_backtest(target_date, target_time, stock_list):
                 "P&L (%)": f"{pnl_pct:+.2f}%",
                 "Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
             })
+            
+            if len(results) >= top_n_count:
+                break
         except Exception:
             continue
 
     return pd.DataFrame(results)
 
+# --- GLOBAL SETTINGS (TOP LEVEL CONTROLS) ---
+st.subheader("⚙️ Master Engine Settings & Live Price Scanner")
+
+col_info, col_slider = st.columns([2, 1])
+
+with col_info:
+    st.info("🔥 **Live Terminal Active**: Real-time NSE tick stream integrated via `yfinance`. Penny stocks strictly excluded (< ₹50). Market Caps synchronized with SEBI 100/150/251 classification.")
+with col_slider:
+    selected_count = st.slider(
+        "Select Number of Stocks (Buy / Sell / Backtest):",
+        min_value=3,
+        max_value=20,
+        value=5,
+        step=1
+    )
+
+st.markdown("---")
+
 # --- TAB 1: MASTER SCANNER ---
 with main_tab1:
-    st.subheader("⚙️ Master Engine Settings & Live Price Scanner")
-    
-    col_info, col_slider = st.columns([2, 1])
-    
-    with col_info:
-        st.info("🔥 **Live Terminal Active**: Real-time NSE tick stream integrated via `yfinance`. Penny stocks strictly excluded (< ₹50). Market Caps synchronized with SEBI 100/150/251 classification.")
-    with col_slider:
-        selected_count = st.slider(
-            "Select Number of Stocks (Buy / Sell):",
-            min_value=3,
-            max_value=20,
-            value=5,
-            step=1
-        )
-
-    st.markdown("---")
-    
     if st.button("🚀 Run Ultimate Master Confluence Engine", type="primary", use_container_width=True):
-        clause = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 150000 and [0] 15 minute close > 50 ) )"
         with st.spinner("Fetching live tick feeds and executing multi-model confluence matching..."):
-            raw_stocks = fetch_chartink_stocks(clause)
+            raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
             df_b, df_s = process_ultimate_confluence(raw_stocks, selected_count)
             
             st.session_state['df_b_master'] = df_b
@@ -385,7 +396,7 @@ with main_tab1:
 # --- TAB 2: BACKTESTER & TIME ENGINE ---
 with main_tab2:
     st.subheader("📊 Historical Confluence Backtester & Live P&L Audit")
-    st.markdown("Detailed backtest simulation comparing historical market entry levels against **live real-time market prices**.")
+    st.markdown("Detailed backtest simulation executing **identical Chartink strategies** across historical intraday windows.")
     
     col_date, col_time = st.columns(2)
     with col_date:
@@ -393,21 +404,18 @@ with main_tab2:
     with col_time:
         backtest_time = st.time_input("⏰ Select Market Session Window", value=time(9, 30))
         
-    st.info(f"Simulation Target: **{backtest_date} at {backtest_time}**")
-
-    backtest_candidates = ["DIXON", "BHARTIARTL", "PERSISTENT", "POLYCAB", "SBIN", "RELIANCE", "TCS"]
+    st.info(f"Simulation Target: **{backtest_date} at {backtest_time}** | Target Stock Count: **Top {selected_count} Setups**")
 
     if st.button("🚀 Run Backtest & Generate Live Stock Execution Audit", type="primary"):
         st.markdown("---")
-        with st.spinner("Extracting historical intraday candles and evaluating live pricing P&L..."):
-            df_backtest_live = run_live_backtest(backtest_date, backtest_time, backtest_candidates)
+        with st.spinner("Executing strategy query, extracting historical intraday candles, and evaluating live P&L..."):
+            df_backtest_live = run_live_backtest(backtest_date, backtest_time, DEFAULT_SCAN_CLAUSE, selected_count)
             
             if not df_backtest_live.empty:
                 st.success(f"Backtest Audit completed for window: {backtest_date} [{backtest_time}]")
                 
                 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
                 
-                # Calculate metrics dynamically
                 win_count = len(df_backtest_live[df_backtest_live['Status'].str.contains('Target')])
                 total_count = len(df_backtest_live)
                 win_rate = round((win_count / total_count) * 100, 1) if total_count > 0 else 0.0
@@ -417,7 +425,7 @@ with main_tab2:
                 col_m3.metric("Profit Factor", "3.85", "Dynamic Multi-Timeframe")
                 col_m4.metric("Risk Model", "1.5% SL", "Strict Risk Management")
 
-                st.markdown("### 📋 Backtested Stocks Execution Log (Real-Time Price Sync)")
+                st.markdown(f"### 📋 Top {total_count} Backtested Strategy Execution Log")
                 st.dataframe(
                     df_backtest_live,
                     use_container_width=True,
