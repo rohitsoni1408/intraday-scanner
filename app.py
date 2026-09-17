@@ -300,25 +300,65 @@ def fetch_chartink_stocks(scan_condition):
     return []
 
 
-def build_custom_html_table(df):
-    """Renders HTML Table inside a scroll container with direct external target links."""
+def sort_dataframe(df, sort_col, sort_order):
+    """Sorts a DataFrame handling numeric strings (e.g. '₹100', '+1.5%') cleanly."""
+    if df.empty or sort_col not in df.columns:
+        return df
+
+    ascending = sort_order == "Ascending"
+
+    # Create temporary clean numeric series for sorting formatted text columns
+    clean_series = (
+        df[sort_col]
+        .astype(str)
+        .str.replace("₹", "", regex=False)
+        .str.replace("%", "", regex=False)
+        .str.replace("+", "", regex=False)
+        .str.strip()
+    )
+
+    numeric_converted = pd.to_numeric(clean_series, errors="coerce")
+
+    if not numeric_converted.isna().all():
+        sorted_indices = numeric_converted.sort_values(ascending=ascending).index
+        return df.loc[sorted_indices]
+    else:
+        return df.sort_values(by=sort_col, ascending=ascending)
+
+
+def render_interactive_table(df, key_prefix):
+    """Renders HTML Table with dedicated interactive sort filters."""
     if df.empty:
-        return (
-            "<p style='color:#000000;'>No stocks found matching the current"
-            " criteria.</p>"
+        st.info("No stocks found matching the current criteria.")
+        return
+
+    display_cols = [
+        col for col in df.columns if col not in ["RawVolume", "RawPnL"]
+    ]
+
+    col_sort1, col_sort2 = st.columns([2, 1])
+    with col_sort1:
+        sort_column = st.selectbox(
+            "Sort Table By Column:",
+            options=display_cols,
+            index=0,
+            key=f"{key_prefix}_sort_col",
+        )
+    with col_sort2:
+        sort_order = st.radio(
+            "Order:",
+            options=["Descending", "Ascending"],
+            horizontal=True,
+            key=f"{key_prefix}_sort_order",
         )
 
-    headers = "".join([
-        f"<th>{col}</th>"
-        for col in df.columns
-        if col != "RawVolume" and col != "RawPnL"
-    ])
+    sorted_df = sort_dataframe(df, sort_column, sort_order)
+
+    headers = "".join([f"<th>{col}</th>" for col in display_cols])
     rows = ""
-    for _, row in df.iterrows():
+    for _, row in sorted_df.iterrows():
         row_cells = ""
-        for col in df.columns:
-            if col in ["RawVolume", "RawPnL"]:
-                continue
+        for col in display_cols:
             row_cells += f"<td>{row[col]}</td>"
         rows += f"<tr>{row_cells}</tr>"
 
@@ -330,7 +370,7 @@ def build_custom_html_table(df):
         </table>
     </div>
     """
-    return html_code
+    st.markdown(html_code, unsafe_allow_html=True)
 
 
 # --- INTRADAY ENGINE ---
@@ -799,14 +839,14 @@ with main_tab1:
     with sub_tab_buy:
         df_b = st.session_state["df_b_master"]
         if not df_b.empty:
-            st.markdown(build_custom_html_table(df_b), unsafe_allow_html=True)
+            render_interactive_table(df_b, key_prefix="intra_buy")
         else:
             st.info("Click the button above to run the intraday scanner.")
 
     with sub_tab_sell:
         df_s = st.session_state["df_s_master"]
         if not df_s.empty:
-            st.markdown(build_custom_html_table(df_s), unsafe_allow_html=True)
+            render_interactive_table(df_s, key_prefix="intra_sell")
         else:
             st.info("Click the button above to run the intraday scanner.")
 
@@ -858,7 +898,7 @@ with main_tab2:
         col_m5.metric("Stop Losses Hit", f"🛑 {sl_hits}")
         st.markdown("---")
 
-        st.markdown(build_custom_html_table(df_bt), unsafe_allow_html=True)
+        render_interactive_table(df_bt, key_prefix="backtest")
     else:
         st.info("Select a date and click the button above to run backtesting.")
 
@@ -889,7 +929,7 @@ with main_tab3:
         and not st.session_state["df_mtf_strategy"].empty
     ):
         df_display = st.session_state["df_mtf_strategy"].head(selected_count)
-        st.markdown(build_custom_html_table(df_display), unsafe_allow_html=True)
+        render_interactive_table(df_display, key_prefix="weekly_mtf")
     else:
         st.info(
             "Click the button above to run the Weekly MTF Strategy scanner."
