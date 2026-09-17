@@ -12,7 +12,7 @@ st.set_page_config(
     page_title="Ultimate Multi-Timeframe Confluence Terminal", layout="wide"
 )
 
-# --- CUSTOM UI STYLING & SCROLLBAR CONTROL ---
+# --- CUSTOM UI STYLING ---
 st.markdown(
     """
 <style>
@@ -30,54 +30,6 @@ st.markdown(
     }
     .text-buy { color: #00E676; font-weight: bold; }
     .text-sell { color: #FF5252; font-weight: bold; }
-    .text-black { color: #000000; font-weight: normal; }
-    
-    /* Table scroll container for maintaining scrolling bars */
-    .table-container {
-        width: 100%;
-        max-height: 550px;
-        overflow-x: auto;
-        overflow-y: auto;
-        border: 1px solid #262730;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-        background-color: #ffffff;
-    }
-    table.custom-table {
-        width: 100%;
-        border-collapse: collapse;
-        color: #000000;
-        font-family: inherit;
-        font-size: 14px;
-    }
-    table.custom-table th {
-        position: sticky;
-        top: 0;
-        background-color: #1e222d;
-        color: #ffffff;
-        padding: 10px;
-        text-align: left;
-        border-bottom: 2px solid #363a45;
-        z-index: 10;
-    }
-    table.custom-table td {
-        padding: 8px 10px;
-        border-bottom: 1px solid #e0e0e0;
-        white-space: nowrap;
-        color: #000000;
-    }
-    a.chart-btn {
-        background-color: #2962ff;
-        color: #ffffff !important;
-        padding: 4px 10px;
-        border-radius: 4px;
-        text-decoration: none;
-        font-size: 12px;
-        font-weight: bold;
-    }
-    a.chart-btn:hover {
-        background-color: #1e53e5;
-    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -127,7 +79,6 @@ def load_nifty_500_symbols():
         symbols = df["Symbol"].dropna().str.strip().tolist()
         return symbols
     except Exception as e:
-        # Fallback pool in case of external network issue
         return [
             "RELIANCE",
             "TCS",
@@ -300,34 +251,8 @@ def fetch_chartink_stocks(scan_condition):
     return []
 
 
-def sort_dataframe(df, sort_col, sort_order):
-    """Sorts a DataFrame handling numeric strings (e.g. '₹100', '+1.5%') cleanly."""
-    if df.empty or sort_col not in df.columns:
-        return df
-
-    ascending = sort_order == "Ascending"
-
-    # Create temporary clean numeric series for sorting formatted text columns
-    clean_series = (
-        df[sort_col]
-        .astype(str)
-        .str.replace("₹", "", regex=False)
-        .str.replace("%", "", regex=False)
-        .str.replace("+", "", regex=False)
-        .str.strip()
-    )
-
-    numeric_converted = pd.to_numeric(clean_series, errors="coerce")
-
-    if not numeric_converted.isna().all():
-        sorted_indices = numeric_converted.sort_values(ascending=ascending).index
-        return df.loc[sorted_indices]
-    else:
-        return df.sort_values(by=sort_col, ascending=ascending)
-
-
-def render_interactive_table(df, key_prefix):
-    """Renders HTML Table with dedicated interactive sort filters."""
+def render_native_table(df, key_prefix):
+    """Renders a native interactive table with header-click sorting and direct link columns."""
     if df.empty:
         st.info("No stocks found matching the current criteria.")
         return
@@ -335,42 +260,19 @@ def render_interactive_table(df, key_prefix):
     display_cols = [
         col for col in df.columns if col not in ["RawVolume", "RawPnL"]
     ]
+    df_to_show = df[display_cols].copy()
 
-    col_sort1, col_sort2 = st.columns([2, 1])
-    with col_sort1:
-        sort_column = st.selectbox(
-            "Sort Table By Column:",
-            options=display_cols,
-            index=0,
-            key=f"{key_prefix}_sort_col",
-        )
-    with col_sort2:
-        sort_order = st.radio(
-            "Order:",
-            options=["Descending", "Ascending"],
-            horizontal=True,
-            key=f"{key_prefix}_sort_order",
-        )
-
-    sorted_df = sort_dataframe(df, sort_column, sort_order)
-
-    headers = "".join([f"<th>{col}</th>" for col in display_cols])
-    rows = ""
-    for _, row in sorted_df.iterrows():
-        row_cells = ""
-        for col in display_cols:
-            row_cells += f"<td>{row[col]}</td>"
-        rows += f"<tr>{row_cells}</tr>"
-
-    html_code = f"""
-    <div class="table-container">
-        <table class="custom-table">
-            <thead><tr>{headers}</tr></thead>
-            <tbody>{rows}</tbody>
-        </table>
-    </div>
-    """
-    st.markdown(html_code, unsafe_allow_html=True)
+    st.dataframe(
+        df_to_show,
+        column_config={
+            "Chart": st.column_config.LinkColumn(
+                "Chart", display_text="📈 Open Chart"
+            )
+        },
+        hide_index=True,
+        use_container_width=True,
+        key=key_prefix,
+    )
 
 
 # --- INTRADAY ENGINE ---
@@ -453,13 +355,13 @@ def process_ultimate_confluence(
         if rsi_bear_div and pct_change < 0:
             green_reasons.append("5m RSI Bearish Divergence")
 
-        chart_link = f'<a href="https://in.tradingview.com/chart/?symbol=NSE:{symbol}" target="_blank" class="chart-btn">📈 Open Chart</a>'
+        chart_link = f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
 
         if pct_change >= 0:
             status_tag = f"BUY ({', '.join(green_reasons) if green_reasons else 'STRONG MOMENTUM'})"
             stock_entry = {
                 "Symbol": symbol,
-                "Signal": "<span class='text-buy'>BUY</span>",
+                "Signal": "BUY",
                 "Risk Analysis": status_tag,
                 "Session Open (₹)": f"₹{day_open}",
                 "Session High (₹)": f"₹{day_high}",
@@ -479,7 +381,7 @@ def process_ultimate_confluence(
             status_tag = f"SELL ({', '.join(red_reasons) if red_reasons else 'WEAK STRUCTURE'})"
             stock_entry = {
                 "Symbol": symbol,
-                "Signal": "<span class='text-sell'>SELL</span>",
+                "Signal": "SELL",
                 "Risk Analysis": status_tag,
                 "Session Open (₹)": f"₹{day_open}",
                 "Session High (₹)": f"₹{day_high}",
@@ -593,7 +495,7 @@ def fetch_weekly_mtf_strategy(symbols):
                 or (cmp <= vol_poc * 1.03)
                 or (cmp >= weekly_vwap * 0.98 and cmp <= weekly_vwap * 1.05)
             )
-            chart_link = f'<a href="https://in.tradingview.com/chart/?symbol=NSE:{clean_sym}" target="_blank" class="chart-btn">📈 Open Chart</a>'
+            chart_link = f"https://in.tradingview.com/chart/?symbol=NSE:{clean_sym}"
 
             if (bullish_rsi_div or macd_bullish_cross) and is_near_demand:
                 is_buy = True
@@ -617,7 +519,7 @@ def fetch_weekly_mtf_strategy(symbols):
             if is_buy:
                 results.append({
                     "Symbol": clean_sym,
-                    "Signal": "<span class='text-buy'>BUY</span>",
+                    "Signal": "BUY",
                     "Weekly Close (₹)": f"₹{cmp}",
                     "Weekly VWAP (₹)": f"₹{weekly_vwap}",
                     "Volume POC (₹)": f"₹{vol_poc}",
@@ -634,7 +536,7 @@ def fetch_weekly_mtf_strategy(symbols):
             else:
                 results.append({
                     "Symbol": clean_sym,
-                    "Signal": "<span class='text-sell'>SELL</span>",
+                    "Signal": "SELL",
                     "Weekly Close (₹)": f"₹{cmp}",
                     "Weekly VWAP (₹)": f"₹{weekly_vwap}",
                     "Volume POC (₹)": f"₹{vol_poc}",
@@ -686,7 +588,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
 
             is_buy = close_price >= open_price
             entry_price = open_price
-            chart_link = f'<a href="https://in.tradingview.com/chart/?symbol=NSE:{symbol}" target="_blank" class="chart-btn">📈 Open Chart</a>'
+            chart_link = f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
 
             if is_buy:
                 sl, t1, t2 = (
@@ -719,7 +621,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
 
                 results.append({
                     "Symbol": symbol,
-                    "Signal": "<span class='text-buy'>BUY</span>",
+                    "Signal": "BUY",
                     "Session Open (₹)": f"₹{open_price}",
                     "Session High (₹)": f"₹{max_price}",
                     "Session Low (₹)": f"₹{min_price}",
@@ -760,7 +662,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
 
                 results.append({
                     "Symbol": symbol,
-                    "Signal": "<span class='text-sell'>SELL</span>",
+                    "Signal": "SELL",
                     "Session Open (₹)": f"₹{open_price}",
                     "Session High (₹)": f"₹{max_price}",
                     "Session Low (₹)": f"₹{min_price}",
@@ -839,14 +741,14 @@ with main_tab1:
     with sub_tab_buy:
         df_b = st.session_state["df_b_master"]
         if not df_b.empty:
-            render_interactive_table(df_b, key_prefix="intra_buy")
+            render_native_table(df_b, key_prefix="intra_buy")
         else:
             st.info("Click the button above to run the intraday scanner.")
 
     with sub_tab_sell:
         df_s = st.session_state["df_s_master"]
         if not df_s.empty:
-            render_interactive_table(df_s, key_prefix="intra_sell")
+            render_native_table(df_s, key_prefix="intra_sell")
         else:
             st.info("Click the button above to run the intraday scanner.")
 
@@ -898,7 +800,7 @@ with main_tab2:
         col_m5.metric("Stop Losses Hit", f"🛑 {sl_hits}")
         st.markdown("---")
 
-        render_interactive_table(df_bt, key_prefix="backtest")
+        render_native_table(df_bt, key_prefix="backtest")
     else:
         st.info("Select a date and click the button above to run backtesting.")
 
@@ -929,7 +831,7 @@ with main_tab3:
         and not st.session_state["df_mtf_strategy"].empty
     ):
         df_display = st.session_state["df_mtf_strategy"].head(selected_count)
-        render_interactive_table(df_display, key_prefix="weekly_mtf")
+        render_native_table(df_display, key_prefix="weekly_mtf")
     else:
         st.info(
             "Click the button above to run the Weekly MTF Strategy scanner."
