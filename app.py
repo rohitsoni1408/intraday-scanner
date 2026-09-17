@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, time
 
 # Page Configuration
-st.set_page_config(page_title="Intraday Pro Terminal - Multi-Strategy Engine", layout="wide")
+st.set_page_config(page_title="Intraday Pro Terminal - Dynamic Selector", layout="wide")
 
 # --- CUSTOM 3D & GLOW UI STYLING ---
 st.markdown("""
@@ -47,10 +47,10 @@ if not st.session_state.authenticated:
     st.stop()
 
 # --- MAIN APP (Unlocked) ---
-st.title("💎 NSE Multi-Strategy Alternative Terminal")
-st.markdown("Select alternative institutional trading models incorporating **RSI, MACD, Supertrend, Volume, Bollinger Bands, VWAP, & Zones**.")
+st.title("💎 NSE Multi-Strategy Dynamic Terminal")
+st.markdown("Configure your custom strategy parameters and choose the exact number of top stocks to review and trade.")
 
-main_tab1, main_tab2 = st.tabs(["⚡ Strategy Execution Feed (Top 10)", "📊 Strategy Backtester & Time Engine"])
+main_tab1, main_tab2 = st.tabs(["⚡ Strategy Execution Feed", "📊 Strategy Backtester & Time Engine"])
 
 def fetch_chartink_stocks(scan_condition):
     url = "https://chartink.com/screener/process"
@@ -87,12 +87,11 @@ def classify_market_cap(symbol, volume):
     else:
         return "Mid Cap" if volume > 2000000 else "Small Cap"
 
-def process_strategy_setups(stock_data, strategy_mode):
-    """Filters stocks based on the selected alternative trading model."""
+def process_strategy_setups(stock_data, strategy_mode, top_n_count):
+    """Filters stocks based on selected strategy model and slices based on user-defined count."""
     buy_list = []
     sell_list = []
     
-    # Alternate fallback universe pools tailored per strategy mode
     if strategy_mode == "Strategy A: Full Technical Confluence (RSI+MACD+VWAP)":
         pool = [
             {"symbol": "RELIANCE", "price": 2850.0, "chg": 2.2, "vol": 5200000},
@@ -100,11 +99,21 @@ def process_strategy_setups(stock_data, strategy_mode):
             {"symbol": "INFY", "price": 1780.0, "chg": 2.4, "vol": 3900000},
             {"symbol": "BHARTIARTL", "price": 1650.0, "chg": 3.1, "vol": 4600000},
             {"symbol": "ITC", "price": 440.0, "chg": 1.5, "vol": 6100000},
+            {"symbol": "LT", "price": 3600.0, "chg": 2.0, "vol": 2900000},
+            {"symbol": "AXISBANK", "price": 1150.0, "chg": 1.6, "vol": 3400000},
+            {"symbol": "SUNPHARMA", "price": 1820.0, "chg": 1.9, "vol": 2500000},
+            {"symbol": "TITAN", "price": 3400.0, "chg": 2.5, "vol": 2100000},
+            {"symbol": "ASIANPAINT", "price": 2900.0, "chg": 1.4, "vol": 2300000},
             {"symbol": "HDFCBANK", "price": 1650.0, "chg": -1.6, "vol": 4800000},
             {"symbol": "ICICIBANK", "price": 1140.0, "chg": -1.9, "vol": 4500000},
             {"symbol": "SBIN", "price": 820.0, "chg": -2.1, "vol": 5500000},
             {"symbol": "BAJFINANCE", "price": 7200.0, "chg": -2.4, "vol": 2800000},
-            {"symbol": "NTPC", "price": 380.0, "chg": -1.8, "vol": 4200000}
+            {"symbol": "MARUTI", "price": 12100.0, "chg": -1.5, "vol": 1900000},
+            {"symbol": "NTPC", "price": 380.0, "chg": -1.8, "vol": 4200000},
+            {"symbol": "POWERGRID", "price": 320.0, "chg": -2.0, "vol": 3800000},
+            {"symbol": "TATASTEEL", "price": 160.0, "chg": -2.2, "vol": 7200000},
+            {"symbol": "HINDUNILVR", "price": 2450.0, "chg": -1.3, "vol": 2200000},
+            {"symbol": "KOTAKBANK", "price": 1800.0, "chg": -1.7, "vol": 3100000}
         ]
     elif strategy_mode == "Strategy B: Volume Breakout & Opening Range (ORB)":
         pool = [
@@ -113,11 +122,21 @@ def process_strategy_setups(stock_data, strategy_mode):
             {"symbol": "LT", "price": 3600.0, "chg": 2.6, "vol": 3400000},
             {"symbol": "SUNPHARMA", "price": 1820.0, "chg": 2.2, "vol": 2900000},
             {"symbol": "TITAN", "price": 3400.0, "chg": 2.8, "vol": 2700000},
+            {"symbol": "RELIANCE", "price": 2850.0, "chg": 2.5, "vol": 4800000},
+            {"symbol": "TCS", "price": 4120.0, "chg": 2.1, "vol": 3900000},
+            {"symbol": "INFY", "price": 1780.0, "chg": 2.7, "vol": 3600000},
+            {"symbol": "BHARTIARTL", "price": 1650.0, "chg": 3.2, "vol": 4300000},
+            {"symbol": "BAJFINANCE", "price": 7200.0, "chg": 3.0, "vol": 3100000},
             {"symbol": "POWERGRID", "price": 320.0, "chg": -2.7, "vol": 4900000},
             {"symbol": "MARUTI", "price": 12100.0, "chg": -2.3, "vol": 2100000},
             {"symbol": "ASIANPAINT", "price": 2900.0, "chg": -2.0, "vol": 2500000},
             {"symbol": "KOTAKBANK", "price": 1800.0, "chg": -2.5, "vol": 3600000},
-            {"symbol": "HINDUNILVR", "price": 2450.0, "chg": -1.9, "vol": 2400000}
+            {"symbol": "HINDUNILVR", "price": 2450.0, "chg": -1.9, "vol": 2400000},
+            {"symbol": "SBIN", "price": 820.0, "chg": -2.4, "vol": 4900000},
+            {"symbol": "ICICIBANK", "price": 1140.0, "chg": -2.1, "vol": 4400000},
+            {"symbol": "HDFCBANK", "price": 1650.0, "chg": -1.7, "vol": 4100000},
+            {"symbol": "NTPC", "price": 380.0, "chg": -2.2, "vol": 3900000},
+            {"symbol": "ITC", "price": 440.0, "chg": -1.6, "vol": 5200000}
         ]
     else:  # Strategy C: Zone Pullback & Bollinger Re-test
         pool = [
@@ -126,11 +145,21 @@ def process_strategy_setups(stock_data, strategy_mode):
             {"symbol": "TCS", "price": 4120.0, "chg": 1.7, "vol": 3800000},
             {"symbol": "BAJFINANCE", "price": 7200.0, "chg": 3.0, "vol": 3100000},
             {"symbol": "BHARTIARTL", "price": 1650.0, "chg": 2.5, "vol": 3900000},
+            {"symbol": "ITC", "price": 440.0, "chg": 1.8, "vol": 4500000},
+            {"symbol": "LT", "price": 3600.0, "chg": 2.2, "vol": 2700000},
+            {"symbol": "AXISBANK", "price": 1150.0, "chg": 1.9, "vol": 3100000},
+            {"symbol": "SUNPHARMA", "price": 1820.0, "chg": 2.0, "vol": 2400000},
+            {"symbol": "TITAN", "price": 3400.0, "chg": 2.3, "vol": 2200000},
             {"symbol": "SBIN", "price": 820.0, "chg": -2.3, "vol": 4600000},
             {"symbol": "ICICIBANK", "price": 1140.0, "chg": -2.0, "vol": 4200000},
             {"symbol": "HDFCBANK", "price": 1650.0, "chg": -1.8, "vol": 3900000},
             {"symbol": "TATASTEEL", "price": 160.0, "chg": -3.1, "vol": 6800000},
-            {"symbol": "NTPC", "price": 380.0, "chg": -2.1, "vol": 3500000}
+            {"symbol": "NTPC", "price": 380.0, "chg": -2.1, "vol": 3500000},
+            {"symbol": "POWERGRID", "price": 320.0, "chg": -2.4, "vol": 4100000},
+            {"symbol": "MARUTI", "price": 12100.0, "chg": -1.9, "vol": 1800000},
+            {"symbol": "ASIANPAINT", "price": 2900.0, "chg": -1.7, "vol": 2100000},
+            {"symbol": "KOTAKBANK", "price": 1800.0, "chg": -2.2, "vol": 2900000},
+            {"symbol": "HINDUNILVR", "price": 2450.0, "chg": -1.5, "vol": 2000000}
         ]
 
     combined_data = stock_data if len(stock_data) >= 10 else pool
@@ -186,23 +215,35 @@ def process_strategy_setups(stock_data, strategy_mode):
                 'News Feed': f"https://www.google.com/search?q={symbol}+stock+news+NSE+today"
             })
 
-    df_buy = pd.DataFrame(buy_list).sort_values(by='RawVolume', ascending=False).head(5)
-    df_sell = pd.DataFrame(sell_list).sort_values(by='RawVolume', ascending=False).head(5)
+    # Dynamically apply user-selected count using slider parameter
+    df_buy = pd.DataFrame(buy_list).sort_values(by='RawVolume', ascending=False).head(top_n_count)
+    df_sell = pd.DataFrame(sell_list).sort_values(by='RawVolume', ascending=False).head(top_n_count)
 
     return df_buy, df_sell
 
 # --- TAB 1: STRATEGY SCANNER ---
 with main_tab1:
-    st.subheader("🎯 Select an Alternative Strategy Framework")
+    st.subheader("🎯 Configure Strategy & Stock Selection Volume")
     
-    selected_strategy = st.selectbox(
-        "Choose Trading Setup Option to Review:",
-        options=[
-            "Strategy A: Full Technical Confluence (RSI+MACD+VWAP)",
-            "Strategy B: Volume Breakout & Opening Range (ORB)",
-            "Strategy C: Zone Pullback & Bollinger Re-test"
-        ]
-    )
+    col_strat, col_slider = st.columns([2, 1])
+    
+    with col_strat:
+        selected_strategy = st.selectbox(
+            "Choose Trading Setup Option to Review:",
+            options=[
+                "Strategy A: Full Technical Confluence (RSI+MACD+VWAP)",
+                "Strategy B: Volume Breakout & Opening Range (ORB)",
+                "Strategy C: Zone Pullback & Bollinger Re-test"
+            ]
+        )
+    with col_slider:
+        selected_count = st.slider(
+            "Select Number of Stocks (Buy / Sell):",
+            min_value=3,
+            max_value=20,
+            value=5,  # Default to 5 stocks
+            step=1
+        )
 
     with st.expander(f"📖 Review Rules for: {selected_strategy}"):
         if "Strategy A" in selected_strategy:
@@ -223,26 +264,26 @@ with main_tab1:
 
     st.markdown("---")
     
-    if st.button("🚀 Run Selected Strategy Model", type="primary", use_container_width=True):
+    if st.button("🚀 Run Strategy Model & Apply Count", type="primary", use_container_width=True):
         clause = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 150000 ) )"
-        with st.spinner(f"Evaluating {selected_strategy}..."):
+        with st.spinner(f"Evaluating {selected_strategy} for top {selected_count} setups..."):
             raw_stocks = fetch_chartink_stocks(clause)
-            df_b, df_s = process_strategy_setups(raw_stocks, selected_strategy)
+            df_b, df_s = process_strategy_setups(raw_stocks, selected_strategy, selected_count)
             
             st.session_state['df_b'] = df_b
             st.session_state['df_s'] = df_s
-            st.success("Strategy model executed successfully! Top 10 setups loaded.")
+            st.success(f"Strategy model executed! Loaded top {selected_count} Buy and {selected_count} Sell setups.")
 
     if 'df_b' not in st.session_state:
-        empty_b, empty_s = process_strategy_setups([], selected_strategy)
+        empty_b, empty_s = process_strategy_setups([], selected_strategy, selected_count)
         st.session_state['df_b'] = empty_b
         st.session_state['df_s'] = empty_s
 
-    sub_tab_buy, sub_tab_sell = st.tabs(["🟢 Top 5 Buy Setups (Long)", "🔴 Top 5 Sell Setups (Short)"])
+    sub_tab_buy, sub_tab_sell = st.tabs([f"🟢 Top {selected_count} Buy Setups (Long)", f"🔴 Top {selected_count} Sell Setups (Short)"])
 
     with sub_tab_buy:
         df_b = st.session_state['df_b']
-        st.markdown("### 🟢 Top 5 Buy Opportunities (Alternative Model)")
+        st.markdown(f"### 🟢 Top {len(df_b)} Buy Opportunities")
         if not df_b.empty:
             st.dataframe(
                 df_b.drop(columns=['RawVolume'], errors='ignore'),
@@ -257,7 +298,7 @@ with main_tab1:
 
     with sub_tab_sell:
         df_s = st.session_state['df_s']
-        st.markdown("### 🔴 Top 5 Sell Opportunities (Alternative Model)")
+        st.markdown(f"### 🔴 Top {len(df_s)} Sell Opportunities")
         if not df_s.empty:
             st.dataframe(
                 df_s.drop(columns=['RawVolume'], errors='ignore'),
