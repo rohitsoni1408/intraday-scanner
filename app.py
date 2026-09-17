@@ -49,30 +49,39 @@ if not st.session_state.authenticated:
 st.title("👑 NSE Ultimate Master Confluence Engine")
 st.markdown("Simultaneously filtering non-penny setups across **MTF Trends, Volume ORB, RSI/MACD/VWAP, Bollinger Re-tests, and Fibonacci Ratios**.")
 
-# 3 Main Tabs: Intraday Scanner, Intraday Backtester, and the NEW Swing/Weekly Engine
+# 3 Main Tabs: Intraday Scanner, Intraday Backtester, and Swing/Weekly Engine
 main_tab1, main_tab2, main_tab3 = st.tabs([
     "⚡ Master Confluence Execution Feed", 
     "📊 Intraday Backtester & Time Engine",
     "🗓️ Swing / Weekly Engine & Backtester"
 ])
 
-# --- ACCURATE SEBI MARKET CAP LISTS ---
+# --- EXPANDED LARGE & MID CAP UNIVERSE ---
 LARGE_CAPS = {
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HINDUNILVR",
     "AXISBANK", "KOTAKBANK", "SUNPHARMA", "TITAN", "BAJFINANCE", "MARUTI", "NTPC", "POWERGRID", "ASIANPAINT",
     "ULTRACEMCO", "TATAMOTORS", "COALINDIA", "TATASTEEL", "ADANIENT", "ADANIPORTS", "JSWSTEEL", "HCLTECH",
-    "ONGC", "M&M", "GRASIM", "BAJAJ-AUTO", "NESTLEIND", "SIEMENS", "BEL", "HAL", "IOC", "DLF", "VBL"
+    "ONGC", "M&M", "GRASIM", "BAJAJ-AUTO", "NESTLEIND", "SIEMENS", "BEL", "HAL", "IOC", "DLF", "VBL",
+    "LODHA", "ZYDUSLIFE", "INDUSINDBK", "BAJAJHFL", "TORNTPHARM", "APOLLOHOSP", "HYUNDAI", "BAJAJFINSV",
+    "DRREDDY", "SHREECEM", "BAJAJHLDNG", "UNITDSPR", "ABB", "EICHERMOT", "DIVISLAB", "LICI", "INDHOTEL",
+    "ICICIGI", "CGPOWER", "TRENT", "MOTHERSON", "ADANIPOWER", "JINDALSTEL", "PFC", "TECHM", "LTIM", "WIPRO"
 }
 
 MID_CAPS = {
-    "PERSISTENT", "POLYCAB", "DIXON", "COFORGE", "LTIM", "MPHASIS", "ASTRAL", "SUPREMEIND", "TRENT",
-    "PAGEIND", "MUTHOOTFIN", "CHOLAFIN", "ASHOKLEY", "OBEROIRLTY", "BALKRISIND", "CUMMINSIND", "TIINDIA",
-    "MAXHEALTH", "LUPIN", "AUROPHARMA", "BOSCHLTD", "BHARATFORG", "PIIND", "SRF", "IDEA", "YESBANK", "IDFCFIRSTB"
+    "PERSISTENT", "POLYCAB", "DIXON", "COFORGE", "MPHASIS", "ASTRAL", "SUPREMEIND", "PAGEIND",
+    "MUTHOOTFIN", "CHOLAFIN", "ASHOKLEY", "OBEROIRLTY", "BALKRISIND", "CUMMINSIND", "TIINDIA",
+    "MAXHEALTH", "LUPIN", "AUROPHARMA", "BOSCHLTD", "BHARATFORG", "PIIND", "SRF", "IDEA", "YESBANK",
+    "IDFCFIRSTB", "TATAINVEST", "KPRMILL", "NAUKRI", "LENSKART", "KALYANKJIL", "OFSS", "ANTHEM",
+    "RADICO", "GLAXO", "LGEINDIA", "FEDERALBNK", "AJANTPHARM", "TATACOMM", "EXIDEIND", "OIL",
+    "PETRONET", "LLOYDSME", "PREMIERENE", "LICHSGFIN", "ESCORTS", "GODREJPROP", "ABBOTINDIA", "BHEL"
 }
 
-# --- DEFAULT SCAN CLAUSES ---
+# Combine to create a master scanning pool for Large & Mid Caps
+LARGE_AND_MID_POOL = list(LARGE_CAPS.union(MID_CAPS))
+
+# --- CHARTINK SCAN CLAUSES (Targeting Nifty 100 & Nifty Midcap 150) ---
 DEFAULT_SCAN_CLAUSE = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 150000 and [0] 15 minute close > 50 ) )"
-WEEKLY_SCAN_CLAUSE = "( {cash} ( [0] weekly close > [0] weekly sma(weekly close, 20) and [0] weekly volume > [1] weekly volume and [0] weekly close > 50 ) )"
+WEEKLY_SCAN_CLAUSE = "( {cash ( segment \"nifty 100\" or segment \"nifty midcap 150\" ) } ( [0] weekly close > [0] weekly sma(weekly close, 20) and [0] weekly volume > [1] weekly volume and [0] weekly close > 50 ) )"
 
 def classify_market_cap(symbol):
     """Accurately classifies Market Cap as per NSE / SEBI Top 100/150/251+ frameworks."""
@@ -199,14 +208,11 @@ def process_ultimate_confluence(stock_data, top_n_count):
     buy_list = []
     sell_list = []
     
-    default_symbols = [
-        "RELIANCE", "TCS", "INFY", "BHARTIARTL", "PERSISTENT", "DIXON", 
-        "LT", "AXISBANK", "SUNPHARMA", "TITAN", "BAJFINANCE", "HDFCBANK", 
-        "ICICIBANK", "SBIN", "POLYCAB", "MARUTI", "KOTAKBANK", "ASIANPAINT"
-    ]
-
+    default_symbols = LARGE_AND_MID_POOL[:30]
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in stock_data if item.get('nsecode', item.get('symbol', ''))]
-    active_symbols = extracted_symbols if len(extracted_symbols) >= 5 else default_symbols
+    
+    # Ensure sufficient stock candidates by merging scan output with Large/Mid Cap pool
+    active_symbols = list(dict.fromkeys(extracted_symbols + default_symbols))
 
     live_prices = fetch_live_market_data(active_symbols)
 
@@ -231,17 +237,15 @@ def process_ultimate_confluence(stock_data, top_n_count):
         diff = day_high - day_low
         
         if pct_change >= 0:
-            # Intraday Long Setups
             fib_618 = round(day_high - (diff * 0.618), 2)
             entry_price = fib_618 if fib_618 > day_low else round(cmp * 0.995, 2)
-            sl = round(entry_price * 0.99, 2) # Strict 1% Intraday Risk
+            sl = round(entry_price * 0.99, 2)
             t1 = round(day_high, 2)
             t2 = round(day_high + (diff * 0.5), 2)
         else:
-            # Intraday Short Setups
             fib_618 = round(day_low + (diff * 0.618), 2)
             entry_price = fib_618 if fib_618 < day_high else round(cmp * 1.005, 2)
-            sl = round(entry_price * 1.01, 2) # Strict 1% Intraday Risk
+            sl = round(entry_price * 1.01, 2)
             t1 = round(day_low, 2)
             t2 = round(day_low - (diff * 0.5), 2)
 
@@ -277,15 +281,16 @@ def process_ultimate_confluence(stock_data, top_n_count):
 
     return df_buy, df_sell
 
-# --- PROCESS WEEKLY SWING CONFLUENCE SETUPS ---
+# --- PROCESS WEEKLY SWING CONFLUENCE SETUPS (LARGE & MID CAP FOCUSED) ---
 def process_weekly_confluence(stock_data, top_n_count):
-    """Calculates multi-day/weekly level metrics (3% Risk, 5% and 10% Swing Targets)."""
+    """Calculates multi-day/weekly level metrics specifically for Large & Mid Cap stocks."""
     buy_list = []
     sell_list = []
     
-    default_symbols = ["TRENT", "DIXON", "PERSISTENT", "POLYCAB", "BHARTIARTL", "HAL", "BEL", "RELIANCE", "INFY", "LT"]
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in stock_data if item.get('nsecode', item.get('symbol', ''))]
-    active_symbols = extracted_symbols if len(extracted_symbols) >= 5 else default_symbols
+    
+    # Merge Chartink results with the Large & Mid Cap master pool to ensure a full list of top stocks
+    active_symbols = list(dict.fromkeys(extracted_symbols + LARGE_AND_MID_POOL))
 
     weekly_prices = fetch_weekly_market_data(active_symbols)
 
@@ -331,10 +336,12 @@ def process_weekly_confluence(stock_data, top_n_count):
             'Live Chart': f"https://in.tradingview.com/chart/?symbol=NSE:{symbol}"
         }
 
-        if pct_change >= 0:
-            buy_list.append(stock_entry)
-        else:
-            sell_list.append(stock_entry)
+        # Focus strictly on Large & Mid cap categories
+        if stock_entry['Category'] in ["Large Cap", "Mid Cap"]:
+            if pct_change >= 0:
+                buy_list.append(stock_entry)
+            else:
+                sell_list.append(stock_entry)
 
     df_buy = pd.DataFrame(buy_list).sort_values(by='RawVolume', ascending=False).head(top_n_count) if buy_list else pd.DataFrame()
     df_sell = pd.DataFrame(sell_list).sort_values(by='RawVolume', ascending=False).head(top_n_count) if sell_list else pd.DataFrame()
@@ -346,9 +353,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
     """Runs intraday backtest using single session intraday 5m data."""
     raw_stocks = fetch_chartink_stocks(scan_clause)
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
-    
-    default_candidates = ["DIXON", "BHARTIARTL", "PERSISTENT", "POLYCAB", "SBIN", "RELIANCE", "TCS", "INFY", "LT", "HDFCBANK"]
-    stock_list = extracted_symbols[:top_n_count*2] if len(extracted_symbols) >= 5 else default_candidates[:top_n_count*2]
+    stock_list = list(dict.fromkeys(extracted_symbols + LARGE_AND_MID_POOL[:20]))[:top_n_count*2]
     
     results = []
     
@@ -438,12 +443,10 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
 
 # --- WEEKLY SWING BACKTESTER ENGINE ---
 def run_weekly_backtest(start_date, scan_clause, top_n_count, hold_weeks=2):
-    """Backtests multi-week swing performance using 1D candles over a custom multi-week period."""
+    """Backtests multi-week swing performance focused on Large and Mid Caps."""
     raw_stocks = fetch_chartink_stocks(scan_clause)
     extracted_symbols = [item.get('nsecode', item.get('symbol', '')).strip() for item in raw_stocks if item.get('nsecode', item.get('symbol', ''))]
-    
-    default_candidates = ["DIXON", "TRENT", "PERSISTENT", "POLYCAB", "BHARTIARTL", "HAL", "BEL", "RELIANCE"]
-    stock_list = extracted_symbols[:top_n_count*2] if len(extracted_symbols) >= 5 else default_candidates[:top_n_count*2]
+    stock_list = list(dict.fromkeys(extracted_symbols + LARGE_AND_MID_POOL))[:top_n_count*2]
     
     results = []
     end_date = start_date + timedelta(weeks=hold_weeks)
@@ -465,7 +468,6 @@ def run_weekly_backtest(start_date, scan_clause, top_n_count, hold_weeks=2):
             if entry_price < 50.0:
                 continue
 
-            # Swing Logic: 3% SL, Target 1 = +5%, Target 2 = +10%
             sl = round(entry_price * 0.97, 2)
             t1 = round(entry_price * 1.05, 2)
             t2 = round(entry_price * 1.10, 2)
@@ -512,13 +514,13 @@ st.subheader("⚙️ Master Engine Settings & Live Scanner")
 col_info, col_slider = st.columns([2, 1])
 
 with col_info:
-    st.info("🔥 **Live Terminal Active**: Real-time NSE tick stream integrated via `yfinance`. Penny stocks strictly excluded (< ₹50). Multi-timeframe execution filters active.")
+    st.info("🔥 **Large & Mid Cap Mode Active**: Real-time NSE tick stream integrated. Filtering strictly Nifty 100 & Nifty Midcap 150 universes.")
 with col_slider:
     selected_count = st.slider(
         "Select Number of Stocks (Buy / Sell / Backtest):",
         min_value=3,
         max_value=20,
-        value=5,
+        value=10,
         step=1
     )
 
@@ -639,22 +641,22 @@ with main_tab2:
             else:
                 st.error("Could not fetch historical intraday data for the selected session date. Note: Intraday 5m data is available for up to 60 days.")
 
-# --- TAB 3: NEW SWING / WEEKLY PROFIT TRADE ENGINE & BACKTESTER ---
+# --- TAB 3: SWING / WEEKLY PROFIT TRADE ENGINE & BACKTESTER ---
 with main_tab3:
-    st.subheader("🗓️ Multi-Week / Swing Profit Trade Engine")
-    st.markdown("Scans higher timeframes (Weekly / Daily) for momentum breakouts, offering swing setups designed for multi-week holds with a **3% Stop Loss and 5% / 10% Targets**.")
+    st.subheader("🗓️ Multi-Week / Swing Profit Trade Engine (Large & Mid Cap Focus)")
+    st.markdown("Scans Nifty 100 and Nifty Midcap 150 universes for weekly momentum breakouts (**3% Stop Loss, 5% & 10% Targets**).")
 
     swing_subtab1, swing_subtab2 = st.tabs(["📈 Weekly Live Swing Feed", "📊 Weekly Strategy Backtester"])
 
     # Sub-tab 1: Live Weekly Scanner
     with swing_subtab1:
         if st.button("🚀 Run Weekly Swing Confluence Scanner", type="primary", use_container_width=True):
-            with st.spinner("Fetching higher timeframe (Weekly/Daily) price data and computing swing levels..."):
+            with st.spinner("Scanning Nifty 100 & Nifty Midcap 150 universes for weekly swing breakouts..."):
                 raw_weekly = fetch_chartink_stocks(WEEKLY_SCAN_CLAUSE)
                 df_wb, df_ws = process_weekly_confluence(raw_weekly, selected_count)
                 st.session_state['df_wb_master'] = df_wb
                 st.session_state['df_ws_master'] = df_ws
-                st.success("Weekly swing scan complete!")
+                st.success("Weekly Large & Mid Cap swing scan complete!")
 
         if 'df_wb_master' not in st.session_state:
             empty_wb, empty_ws = process_weekly_confluence([], selected_count)
@@ -662,7 +664,7 @@ with main_tab3:
             st.session_state['df_ws_master'] = empty_ws
 
         df_wb = st.session_state['df_wb_master']
-        st.markdown(f"### 🟢 Top {len(df_wb)} High-Conviction Weekly Swing Buy Setups")
+        st.markdown(f"### 🟢 Top {len(df_wb)} Large & Mid Cap Weekly Swing Buy Setups")
         if not df_wb.empty:
             st.dataframe(
                 df_wb.drop(columns=['RawVolume'], errors='ignore'),
@@ -685,7 +687,7 @@ with main_tab3:
     # Sub-tab 2: Multi-Week Backtester
     with swing_subtab2:
         st.markdown("### 📊 Historical Multi-Week Swing Strategy Backtester")
-        st.markdown("Audits how weekly breakout setups performed over a **1 to 4 week holding window**.")
+        st.markdown("Audits Large & Mid Cap weekly breakouts over a **1 to 4 week holding window**.")
 
         col_w_date, col_w_hold = st.columns(2)
         with col_w_date:
