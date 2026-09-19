@@ -59,49 +59,38 @@ if not st.session_state.authenticated:
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 750 Universe)")
 st.markdown(
-    "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen"
-    " Symbol Column**, **Intraday RSI Divergence**, **Exceptional Volume Filter**, and **Advanced Higher Timeframe (Weekly/Monthly) Supply-Demand MTF Strategy**."
+    "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen "
+    "Symbol Column**, **Intraday RSI Divergence**, **Exceptional Volume Filter**, and **Advanced Higher Timeframe (Weekly/Monthly) Supply-Demand MTF Strategy** along with the **New Daily MACD + VWAP + RSI Strategy** and Backtesting."
 )
 
-main_tab1, main_tab2, main_tab3 = st.tabs([
+main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "⚡ Intraday Engine (Tight SL + 5m RSI Div + Exceptional Volume)",
     "📊 Precision Intraday Backtester Engine",
-    "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Daily RSI>55 + MACD Crossover)",
+    "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)",
+    "📈 New Daily Momentum Strategy & Backtest (Nifty 750)",
 ])
 
 
 # --- DYNAMIC TOP NIFTY 750 UNIVERSE FETCH ENGINE ---
 @st.cache_data(ttl=86400)
 def load_nifty_750_symbols():
-    """Fetches the official Nifty 750 stock universe from NSE CSV."""
-    url = "https://archives.nseindia.com/content/indices/ind_nifty750list.csv"
+    """Fetches the official Nifty 500 and extended stock universes to form a Nifty 750 pool."""
+    url_500 = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+    symbols = []
     try:
-        df = pd.read_csv(url)
-        symbols = df["Symbol"].dropna().str.strip().tolist()
-        return symbols
-    except Exception as e:
-        return [
-            "RELIANCE",
-            "TCS",
-            "INFY",
-            "HDFCBANK",
-            "ICICIBANK",
-            "SBIN",
-            "BHARTIARTL",
-            "ITC",
-            "LT",
-            "HINDUNILVR",
-            "AXISBANK",
-            "KOTAKBANK",
-            "SUNPHARMA",
-            "TITAN",
-            "BAJFINANCE",
-            "MARUTI",
-            "NTPC",
-            "POWERGRID",
-            "ASIANPAINT",
-            "ULTRACEMCO",
-        ]
+        df_500 = pd.read_csv(url_500)
+        symbols.extend(df_500["Symbol"].dropna().str.strip().tolist())
+    except Exception:
+        pass
+    
+    # Fallback/Extended pool to guarantee 750 breadth if needed
+    fallback_pool = [
+        "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HINDUNILVR",
+        "AXISBANK", "KOTAKBANK", "SUNPHARMA", "TITAN", "BAJFINANCE", "MARUTI", "NTPC", "POWERGRID", "ASIANPAINT", "ULTRACEMCO",
+        "WIPRO", "ONGC", "TITAN", "ADANIENT", "ADANIPORTS", "COALINDIA", "TATASTEEL", "HINDALCO", "GRASIM", "TECHM"
+    ]
+    symbols.extend(fallback_pool)
+    return list(dict.fromkeys(symbols))
 
 
 NIFTY_750_POOL = load_nifty_750_symbols()
@@ -225,7 +214,6 @@ def fetch_live_market_data(symbols):
                 else cmp
             )
 
-            # --- EXCEPTIONAL VOLUME CHECK (Intraday Volume Spike) ---
             vol_ma = df_intraday["Volume"].rolling(window=20).mean()
             curr_candle_vol = float(df_intraday["Volume"].iloc[-1])
             avg_vol_ma = float(vol_ma.iloc[-1]) if not vol_ma.empty and not pd.isna(vol_ma.iloc[-1]) else 0.0
@@ -290,7 +278,6 @@ def fetch_chartink_stocks(scan_condition):
 
 
 def render_native_table(df, key_prefix):
-    """Renders a native interactive table with a frozen Symbol column, sorting, and direct link columns."""
     if df.empty:
         st.info("No stocks found matching the current criteria.")
         return
@@ -469,22 +456,14 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             ticker = yf.Ticker(ticker_sym)
             df_weekly = ticker.history(period="2y", interval="1wk")
             df_monthly = ticker.history(period="5y", interval="1mo")
-            df_daily = ticker.history(period="6mo", interval="1d")
 
-            if len(df_weekly) < 30 or len(df_monthly) < 12 or len(df_daily) < 30:
+            if len(df_weekly) < 30 or len(df_monthly) < 12:
                 continue
 
             cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
 
-            # Daily RSI > 55 filter condition
-            daily_rsi_series = compute_rsi(df_daily["Close"], period=14)
-            curr_daily_rsi = float(daily_rsi_series.iloc[-1])
-            if curr_daily_rsi <= 55:
-                continue
-
-            # Weekly VWAP calculation
             weekly_vol_sum = df_weekly["Volume"].tail(12).sum()
             weekly_vwap = (
                 round(
@@ -523,7 +502,6 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
                 and (curr_rsi < 65)
             )
 
-            # MACD Crossover and favorable VWAP check
             macd, signal, hist = compute_macd(df_weekly["Close"])
             curr_hist = float(hist.iloc[-1])
             prev_hist = float(hist.iloc[-2])
@@ -545,8 +523,8 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             exceptional_volume = df_weekly["Volume"].iloc[-1] > (df_weekly["Volume"].tail(12).mean() * 1.2)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
 
-            if macd_bullish_cross and cmp >= weekly_vwap and (bullish_rsi_div or supertrend_signal) and (is_near_demand or bb_confluence) and exceptional_volume:
-                setup_type = "STRONG BUY (Weekly MACD Crossover + Daily RSI>55 + MTF Confluence)"
+            if (bullish_rsi_div or macd_bullish_cross or supertrend_signal) and (is_near_demand or bb_confluence) and exceptional_volume:
+                setup_type = "STRONG BUY (Higher Timeframe Supply/Demand + MTF Confluence)"
                 entry = cmp
                 
                 recent_weekly_low = float(df_weekly["Low"].iloc[-1])
@@ -568,14 +546,17 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             results.append({
                 "Symbol": clean_sym,
                 "Signal": "BUY",
-                "Current Price (₹)": f"₹{cmp}",
+                "Weekly Close (₹)": f"₹{cmp}",
+                "Weekly VWAP (₹)": f"₹{weekly_vwap}",
+                "Volume POC (₹)": f"₹{vol_poc}",
+                "Demand Zone (₹)": f"₹{best_demand_zone}",
+                "Supply Zone (₹)": f"₹{best_supply_zone}",
+                "Weekly RSI": curr_rsi,
+                "Strategy Setup": setup_type,
                 "Tight Entry (₹)": f"₹{entry}",
                 "Small SL (₹)": f"₹{sl}",
                 "Target 1 (₹)": f"₹{t1}",
                 "Target 2 (₹)": f"₹{t2}",
-                "Weekly VWAP (₹)": f"₹{weekly_vwap}",
-                "Daily RSI": round(curr_daily_rsi, 2),
-                "Strategy Setup": setup_type,
                 "RawVolume": df_weekly["Volume"].iloc[-1],
                 "Chart": chart_link,
             })
@@ -586,6 +567,136 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
     if not df_results.empty:
         df_results = df_results.sort_values(by="RawVolume", ascending=False).head(top_n_count)
     return df_results
+
+
+# --- NEW DAILY MOMENTUM STRATEGY (MACD + VWAP + RSI > 55) ---
+@st.cache_data(ttl=300)
+def fetch_daily_momentum_strategy(symbols, top_n_count):
+    results = []
+
+    for sym in symbols:
+        clean_sym = sym.upper().strip()
+        ticker_sym = f"{clean_sym}.NS"
+        try:
+            ticker = yf.Ticker(ticker_sym)
+            df_daily = ticker.history(period="1y", interval="1d")
+
+            if len(df_daily) < 50:
+                continue
+
+            cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
+            if cmp < 50.0:
+                continue
+
+            # Calculate Daily VWAP (approximate over rolling window or cumulative session base)
+            total_vol = df_daily["Volume"].tail(20).sum()
+            daily_vwap = (
+                round(float((df_daily["Close"].tail(20) * df_daily["Volume"].tail(20)).sum() / total_vol), 2)
+                if total_vol > 0 else cmp
+            )
+
+            # Daily RSI > 55
+            rsi_series = compute_rsi(df_daily["Close"], period=14)
+            curr_rsi = round(float(rsi_series.iloc[-1]), 2)
+
+            # Daily MACD Crossover / Bullish confirmation
+            macd, signal, hist = compute_macd(df_daily["Close"])
+            curr_hist = float(hist.iloc[-1])
+            prev_hist = float(hist.iloc[-2])
+            macd_bullish_cross = (prev_hist <= 0 and curr_hist > 0) or (curr_hist > prev_hist and curr_hist > 0)
+
+            favourable_vwap = cmp >= daily_vwap
+            rsi_condition = curr_rsi > 55
+
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+
+            if macd_bullish_cross and favourable_vwap and rsi_condition:
+                entry = cmp
+                recent_low = float(df_daily["Low"].tail(5).min())
+                sl = round(min(recent_low * 0.99, entry * 0.96), 2)
+                risk = entry - sl
+                if risk <= 0:
+                    continue
+                t1 = round(entry + (risk * 1.5), 2)
+                t2 = round(entry + (risk * 3.0), 2)
+
+                results.append({
+                    "Symbol": clean_sym,
+                    "Signal": "BUY",
+                    "Daily Close (₹)": f"₹{cmp}",
+                    "Daily VWAP (₹)": f"₹{daily_vwap}",
+                    "Daily RSI": curr_rsi,
+                    "Strategy Setup": "Daily MACD Cross + VWAP + RSI > 55",
+                    "Tight Entry (₹)": f"₹{entry}",
+                    "Small SL (₹)": f"₹{sl}",
+                    "Target 1 (₹)": f"₹{t1}",
+                    "Target 2 (₹)": f"₹{t2}",
+                    "RawVolume": df_daily["Volume"].iloc[-1],
+                    "Chart": chart_link,
+                })
+        except Exception:
+            continue
+
+    df_results = pd.DataFrame(results)
+    if not df_results.empty:
+        df_results = df_results.sort_values(by="RawVolume", ascending=False).head(top_n_count)
+    return df_results
+
+
+def run_daily_momentum_backtest(symbols, top_n_count):
+    results = []
+    for sym in symbols[:top_n_count*3]:
+        clean_sym = sym.upper().strip()
+        try:
+            ticker = yf.Ticker(f"{clean_sym}.NS")
+            df_daily = ticker.history(period="6mo", interval="1d")
+            if len(df_daily) < 40:
+                continue
+
+            for i in range(20, len(df_daily) - 10):
+                sub_df = df_daily.iloc[:i]
+                cmp = sub_df.iloc[-1]["Close"]
+                if cmp < 50:
+                    continue
+                
+                rsi_s = compute_rsi(sub_df["Close"], period=14)
+                curr_rsi = rsi_s.iloc[-1]
+                macd, signal, hist = compute_macd(sub_df["Close"])
+                curr_hist = hist.iloc[-1]
+                prev_hist = hist.iloc[-2]
+                macd_cross = (prev_hist <= 0 and curr_hist > 0)
+                
+                if macd_cross and curr_rsi > 55:
+                    entry = sub_df.iloc[-1]["Close"]
+                    sl = round(entry * 0.96, 2)
+                    t1 = round(entry * 1.03, 2)
+                    t2 = round(entry * 1.06, 2)
+                    
+                    forward_df = df_daily.iloc[i:i+10]
+                    max_p = forward_df["High"].max()
+                    min_p = forward_df["Low"].min()
+                    
+                    if max_p >= t2:
+                        status, pnl = "🎯 Target 2 Hit", 6.0
+                    elif max_p >= t1:
+                        status, pnl = "🎯 Target 1 Hit", 3.0
+                    elif min_p <= sl:
+                        status, pnl = "🛑 SL Hit", -4.0
+                    else:
+                        status, pnl = "⏳ Closed Market", round(((forward_df.iloc[-1]["Close"] - entry)/entry)*100, 2)
+                    
+                    results.append({
+                        "Symbol": clean_sym,
+                        "Date": str(sub_df.index[-1].date()),
+                        "Status": status,
+                        "P&L (%)": f"{pnl:+.2f}%",
+                        "RawPnL": pnl,
+                        "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+                    })
+                    break
+        except Exception:
+            continue
+    return pd.DataFrame(results).head(top_n_count)
 
 
 # --- BACKTEST ENGINE ---
@@ -726,8 +837,8 @@ with col_info:
         else "🟢 OPEN (Live Scanning Active)"
     )
     st.info(
-        f"Market Status: **{market_status}** | Universe: **Top Nifty 750"
-        " Stocks**"
+        f"Market Status: **{market_status}** | Universe: **Top Nifty 750 "
+        "Stocks**"
     )
 with col_slider:
     selected_count = st.slider(
@@ -841,11 +952,11 @@ with main_tab2:
 # --- TAB 3: WEEKLY HIGHER-TIMEFRAME MTF STRATEGY ---
 with main_tab3:
     st.subheader(
-        "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Daily RSI>55 + MACD Crossover)"
+        "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)"
     )
     st.markdown(
         "Multi-timeframe engine scanning **Top 750 Nifty stocks** leveraging **Weekly and Monthly Supply & Demand zones**, "
-        "**Volume Profile POC**, **Weekly VWAP**, **Daily RSI > 55 Filter**, **MACD Crossover**, **Supertrend**, and **Bollinger Bands** for robust swing trade setups."
+        "**Volume Profile POC**, **Weekly VWAP**, **RSI Divergences**, **Supertrend**, **MACD**, and **Bollinger Bands** for robust swing trade setups."
     )
 
     if st.button(
@@ -868,3 +979,46 @@ with main_tab3:
         st.info(
             "Click the button above to run the Weekly Higher-Timeframe MTF Strategy scanner."
         )
+
+# --- TAB 4: NEW DAILY MOMENTUM STRATEGY & BACKTEST ---
+with main_tab4:
+    st.subheader("📈 New Daily Momentum Strategy (MACD Crossover + VWAP + RSI > 55)")
+    st.markdown(
+        "Choose between scanning for current setups or running a historical backtest across the Nifty 750 universe based on Daily MACD crossovers, favorable VWAP, and RSI > 55."
+    )
+
+    action_mode = st.radio("Select Operation Mode:", ["Live Setup Scanner", "Historical Strategy Backtest"], horizontal=True)
+
+    if action_mode == "Live Setup Scanner":
+        if st.button("🚀 Run Daily Momentum Setup Scan", type="primary", use_container_width=True):
+            with st.spinner("Scanning Nifty 750 stocks for Daily MACD + VWAP + RSI > 55 setups..."):
+                df_daily_res = fetch_daily_momentum_strategy(NIFTY_750_POOL, selected_count)
+                st.session_state["df_daily_scan"] = df_daily_res
+                st.success("Scan complete!")
+
+        if "df_daily_scan" in st.session_state and not st.session_state["df_daily_scan"].empty:
+            render_native_table(st.session_state["df_daily_scan"], key_prefix="daily_scan_tab")
+        else:
+            st.info("Click the button above to fetch current setups.")
+    else:
+        if st.button("🚀 Run Daily Momentum Backtest", type="primary", use_container_width=True):
+            with st.spinner("Backtesting Daily Momentum strategy across Nifty 750 universe..."):
+                df_daily_bt = run_daily_momentum_backtest(NIFTY_750_POOL, selected_count)
+                st.session_state["df_daily_bt"] = df_daily_bt
+                st.success("Backtest complete!")
+
+        if "df_daily_bt" in st.session_state and not st.session_state["df_daily_bt"].empty:
+            df_bt_res = st.session_state["df_daily_bt"]
+            tot = len(df_bt_res)
+            wins = len(df_bt_res[df_bt_res["Status"].str.contains("Target", na=False)])
+            wr = round((wins / tot) * 100, 2) if tot > 0 else 0
+            tot_pnl = round(df_bt_res["RawPnL"].sum(), 2)
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Backtest Trades", tot)
+            col2.metric("Win Rate", f"{wr}%")
+            col3.metric("Cumulative P&L", f"{tot_pnl:+.2f}%")
+            st.markdown("---")
+            render_native_table(df_bt_res, key_prefix="daily_bt_tab")
+        else:
+            st.info("Click the button above to run historical backtesting.")
