@@ -56,6 +56,17 @@ if not st.session_state.authenticated:
                 st.error("Incorrect passcode. Access denied.")
     st.stop()
 
+
+# --- MARKET STATUS HELPER (Defined early so it can be referenced safely) ---
+def is_market_closed():
+    now = datetime.now()
+    if now.weekday() >= 5:
+        return True
+    market_open = time(9, 15)
+    market_close = time(15, 30)
+    return not (market_open <= now.time() <= market_close)
+
+
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
@@ -70,10 +81,11 @@ col_info, col_slider1, col_slider2 = st.columns([2, 1, 1])
 with col_info:
     market_status = (
         "🔴 CLOSED (Post-Market Mode Active)"
-        if is_market_closed() if 'is_market_closed' in globals() else False # handled below
+        if is_market_closed()
         else "🟢 OPEN (Live Scanning Active)"
     )
-    # Market status will be evaluated properly with function defined below
+    st.markdown(f"**Market Status:** {market_status}")
+
 with col_slider1:
     selected_count = st.slider(
         "Output Stock Count:",
@@ -120,15 +132,6 @@ def load_nifty_750_symbols():
 
 NIFTY_750_POOL = load_nifty_750_symbols()
 DEFAULT_SCAN_CLAUSE = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 100000 and [0] 15 minute close > 50 ) )"
-
-
-def is_market_closed():
-    now = datetime.now()
-    if now.weekday() >= 5:
-        return True
-    market_open = time(9, 15)
-    market_close = time(15, 30)
-    return not (market_open <= now.time() <= market_close)
 
 
 # --- TECHNICAL INDICATORS & CONFLUENCE TOOLS ---
