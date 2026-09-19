@@ -60,21 +60,21 @@ if not st.session_state.authenticated:
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 750 Universe)")
 st.markdown(
     "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen "
-    "Symbol Column**, **Intraday RSI Divergence**, **Exceptional Volume Filter**, and **Advanced Higher Timeframe (Weekly/Monthly) Supply-Demand MTF Strategy** along with the **New Daily MACD + VWAP + RSI Strategy** and Backtesting."
+    "Symbol Column**, **Intraday RSI Divergence**, **Exceptional Volume Filter**, **Advanced Higher Timeframe Supply-Demand MTF Strategy**, **Daily MACD Momentum Strategy**, and the **New Elite Swing Strategy (MTF Pullback & Dip Buy)**."
 )
 
-main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
-    "⚡ Intraday Engine (Tight SL + 5m RSI Div + Exceptional Volume)",
-    "📊 Precision Intraday Backtester Engine",
-    "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)",
-    "📈 New Daily Momentum Strategy & Backtest (Nifty 750)",
+main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
+    "⚡ Intraday Engine",
+    "📊 Intraday Backtester",
+    "🗓️ Weekly MTF Strategy",
+    "📈 Daily Momentum",
+    "🎯 Elite Swing Strategy (Pullback & Dip Buy)"
 ])
 
 
 # --- DYNAMIC TOP NIFTY 750 UNIVERSE FETCH ENGINE ---
 @st.cache_data(ttl=86400)
 def load_nifty_750_symbols():
-    """Fetches the official Nifty 500 and extended stock universes to form a Nifty 750 pool."""
     url_500 = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
     symbols = []
     try:
@@ -83,7 +83,6 @@ def load_nifty_750_symbols():
     except Exception:
         pass
     
-    # Fallback/Extended pool to guarantee 750 breadth if needed
     fallback_pool = [
         "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HINDUNILVR",
         "AXISBANK", "KOTAKBANK", "SUNPHARMA", "TITAN", "BAJFINANCE", "MARUTI", "NTPC", "POWERGRID", "ASIANPAINT", "ULTRACEMCO",
@@ -569,7 +568,7 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
     return df_results
 
 
-# --- NEW DAILY MOMENTUM STRATEGY (MACD + VWAP + RSI > 55) ---
+# --- NEW DAILY MOMENTUM STRATEGY ---
 @st.cache_data(ttl=300)
 def fetch_daily_momentum_strategy(symbols, top_n_count):
     results = []
@@ -588,18 +587,15 @@ def fetch_daily_momentum_strategy(symbols, top_n_count):
             if cmp < 50.0:
                 continue
 
-            # Calculate Daily VWAP (approximate over rolling window or cumulative session base)
             total_vol = df_daily["Volume"].tail(20).sum()
             daily_vwap = (
                 round(float((df_daily["Close"].tail(20) * df_daily["Volume"].tail(20)).sum() / total_vol), 2)
                 if total_vol > 0 else cmp
             )
 
-            # Daily RSI > 55
             rsi_series = compute_rsi(df_daily["Close"], period=14)
             curr_rsi = round(float(rsi_series.iloc[-1]), 2)
 
-            # Daily MACD Crossover / Bullish confirmation
             macd, signal, hist = compute_macd(df_daily["Close"])
             curr_hist = float(hist.iloc[-1])
             prev_hist = float(hist.iloc[-2])
@@ -699,6 +695,77 @@ def run_daily_momentum_backtest(symbols, top_n_count):
     return pd.DataFrame(results).head(top_n_count)
 
 
+# --- NEW TAB 5: ELITE SWING STRATEGY (MTF TREND PULLBACK & DIP BUY) ---
+@st.cache_data(ttl=300)
+def fetch_elite_swing_strategy(symbols, top_n_count):
+    results = []
+    for sym in symbols:
+        clean_sym = sym.upper().strip()
+        ticker_sym = f"{clean_sym}.NS"
+        try:
+            ticker = yf.Ticker(ticker_sym)
+            df_daily = ticker.history(period="1y", interval="1d")
+            if len(df_daily) < 60:
+                continue
+            
+            cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
+            if cmp < 50.0:
+                continue
+
+            # 1. Trend Filter: Price above 50-day EMA
+            ema_50 = df_daily["Close"].ewm(span=50, adjust=False).mean()
+            is_uptrend = cmp > ema_50.iloc[-1]
+
+            # 2. Pullback Check: Near moving average / support value zone (within -3% to +4% of 50 EMA)
+            distance_from_ema = (cmp - ema_50.iloc[-1]) / ema_50.iloc[-1]
+            is_pullback = -0.03 <= distance_from_ema <= 0.04
+
+            # 3. Momentum & RSI: Cooling or bouncing in healthy pullback territory (40 to 65)
+            rsi_series = compute_rsi(df_daily["Close"], period=14)
+            curr_rsi = round(float(rsi_series.iloc[-1]), 2)
+            rsi_healthy = 40 <= curr_rsi <= 65
+
+            # 4. Momentum Reversal: MACD histogram turning up
+            macd, signal, hist = compute_macd(df_daily["Close"])
+            curr_hist = float(hist.iloc[-1])
+            prev_hist = float(hist.iloc[-2])
+            macd_turning_up = curr_hist > prev_hist
+
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+
+            if is_uptrend and (is_pullback or rsi_healthy) and macd_turning_up:
+                entry = cmp
+                recent_low = float(df_daily["Low"].tail(10).min())
+                sl = round(min(recent_low * 0.99, entry * 0.95), 2)
+                risk = entry - sl
+                if risk <= 0:
+                    continue
+                t1 = round(entry + (risk * 1.5), 2)
+                t2 = round(entry + (risk * 3.0), 2)
+
+                results.append({
+                    "Symbol": clean_sym,
+                    "Signal": "SWING BUY",
+                    "Daily Close (₹)": f"₹{cmp}",
+                    "50 EMA (₹)": f"₹{round(ema_50.iloc[-1], 2)}",
+                    "RSI (14)": curr_rsi,
+                    "Setup Type": "MTF Trend Pullback & Dip Buy",
+                    "Entry (₹)": f"₹{entry}",
+                    "Stop Loss (₹)": f"₹{sl}",
+                    "Target 1 (₹)": f"₹{t1}",
+                    "Target 2 (₹)": f"₹{t2}",
+                    "RawVolume": df_daily["Volume"].iloc[-1],
+                    "Chart": chart_link,
+                })
+        except Exception:
+            continue
+        
+    df_res = pd.DataFrame(results)
+    if not df_res.empty:
+        df_res = df_res.sort_values(by="RawVolume", ascending=False).head(top_n_count)
+    return df_res
+
+
 # --- BACKTEST ENGINE ---
 def run_live_backtest(target_date, scan_clause, top_n_count):
     raw_stocks = fetch_chartink_stocks(scan_clause)
@@ -731,9 +798,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
 
             is_buy = close_price >= open_price
             entry_price = open_price
-            chart_link = (
-                f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
-            )
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
 
             if is_buy:
                 sl, t1, t2 = (
@@ -742,27 +807,13 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
                     round(entry_price * 1.025, 2),
                 )
                 if max_price >= t2:
-                    status, pnl_val = (
-                        "🎯 Target 2 Hit",
-                        round(((t2 - entry_price) / entry_price) * 100, 2),
-                    )
+                    status, pnl_val = ("🎯 Target 2 Hit", round(((t2 - entry_price) / entry_price) * 100, 2))
                 elif max_price >= t1:
-                    status, pnl_val = (
-                        "🎯 Target 1 Hit",
-                        round(((t1 - entry_price) / entry_price) * 100, 2),
-                    )
+                    status, pnl_val = ("🎯 Target 1 Hit", round(((t1 - entry_price) / entry_price) * 100, 2))
                 elif min_price <= sl:
-                    status, pnl_val = (
-                        "🛑 SL Hit",
-                        round(((sl - entry_price) / entry_price) * 100, 2),
-                    )
+                    status, pnl_val = ("🛑 SL Hit", round(((sl - entry_price) / entry_price) * 100, 2))
                 else:
-                    status, pnl_val = (
-                        "⏳ Closed at Market",
-                        round(
-                            ((close_price - entry_price) / entry_price) * 100, 2
-                        ),
-                    )
+                    status, pnl_val = ("⏳ Closed at Market", round(((close_price - entry_price) / entry_price) * 100, 2))
 
                 results.append({
                     "Symbol": symbol,
@@ -783,27 +834,13 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
                     round(entry_price * 0.975, 2),
                 )
                 if min_price <= t2:
-                    status, pnl_val = (
-                        "🎯 Target 2 Hit",
-                        round(((entry_price - t2) / entry_price) * 100, 2),
-                    )
+                    status, pnl_val = ("🎯 Target 2 Hit", round(((entry_price - t2) / entry_price) * 100, 2))
                 elif min_price <= t1:
-                    status, pnl_val = (
-                        "🎯 Target 1 Hit",
-                        round(((entry_price - t1) / entry_price) * 100, 2),
-                    )
+                    status, pnl_val = ("🎯 Target 1 Hit", round(((entry_price - t1) / entry_price) * 100, 2))
                 elif max_price >= sl:
-                    status, pnl_val = (
-                        "🛑 SL Hit",
-                        round(((entry_price - sl) / entry_price) * 100, 2),
-                    )
+                    status, pnl_val = ("🛑 SL Hit", round(((entry_price - sl) / entry_price) * 100, 2))
                 else:
-                    status, pnl_val = (
-                        "⏳ Closed at Market",
-                        round(
-                            ((entry_price - close_price) / entry_price) * 100, 2
-                        ),
-                    )
+                    status, pnl_val = ("⏳ Closed at Market", round(((entry_price - close_price) / entry_price) * 100, 2))
 
                 results.append({
                     "Symbol": symbol,
@@ -836,10 +873,7 @@ with col_info:
         if is_market_closed()
         else "🟢 OPEN (Live Scanning Active)"
     )
-    st.info(
-        f"Market Status: **{market_status}** | Universe: **Top Nifty 750 "
-        "Stocks**"
-    )
+    st.info(f"Market Status: **{market_status}** | Universe: **Top Nifty 750 Stocks**")
 with col_slider:
     selected_count = st.slider(
         "Select Stock Output Count:",
@@ -859,9 +893,7 @@ with main_tab1:
         value=is_market_closed(),
     )
 
-    if st.button(
-        "🚀 Run Intraday Engine Scan", type="primary", use_container_width=True
-    ):
+    if st.button("🚀 Run Intraday Engine Scan", type="primary", use_container_width=True):
         with st.spinner("Scanning Nifty 750 stocks for intraday setups..."):
             raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
             df_b, df_s = process_ultimate_confluence(
@@ -906,32 +938,19 @@ with main_tab2:
     )
 
     if st.button("🚀 Run Intraday Backtest", type="primary"):
-        with st.spinner(
-            "Executing backtest over Nifty 750 intraday candles..."
-        ):
-            df_bt = run_live_backtest(
-                backtest_date, DEFAULT_SCAN_CLAUSE, selected_count
-            )
+        with st.spinner("Executing backtest over Nifty 750 intraday candles..."):
+            df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count)
             st.session_state["df_bt_results"] = df_bt
 
-    if (
-        "df_bt_results" in st.session_state
-        and not st.session_state["df_bt_results"].empty
-    ):
+    if "df_bt_results" in st.session_state and not st.session_state["df_bt_results"].empty:
         df_bt = st.session_state["df_bt_results"]
 
         total_trades = len(df_bt)
-        t1_hits = len(
-            df_bt[df_bt["Status"].str.contains("Target 1", na=False)]
-        )
-        t2_hits = len(
-            df_bt[df_bt["Status"].str.contains("Target 2", na=False)]
-        )
+        t1_hits = len(df_bt[df_bt["Status"].str.contains("Target 1", na=False)])
+        t2_hits = len(df_bt[df_bt["Status"].str.contains("Target 2", na=False)])
         sl_hits = len(df_bt[df_bt["Status"].str.contains("SL Hit", na=False)])
         wins = t1_hits + t2_hits
-        win_rate = (
-            round((wins / total_trades) * 100, 2) if total_trades > 0 else 0.0
-        )
+        win_rate = round((wins / total_trades) * 100, 2) if total_trades > 0 else 0.0
         total_pnl = round(df_bt["RawPnL"].sum(), 2)
 
         st.markdown("#### 📈 Backtest Performance Summary")
@@ -939,9 +958,7 @@ with main_tab2:
         col_m1.metric("Total Trades", total_trades)
         col_m2.metric("Win Rate", f"{win_rate}%")
         col_m3.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
-        col_m4.metric(
-            "Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}"
-        )
+        col_m4.metric("Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}")
         col_m5.metric("Stop Losses Hit", f"🛑 {sl_hits}")
         st.markdown("---")
 
@@ -951,34 +968,22 @@ with main_tab2:
 
 # --- TAB 3: WEEKLY HIGHER-TIMEFRAME MTF STRATEGY ---
 with main_tab3:
-    st.subheader(
-        "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)"
-    )
+    st.subheader("🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)")
     st.markdown(
         "Multi-timeframe engine scanning **Top 750 Nifty stocks** leveraging **Weekly and Monthly Supply & Demand zones**, "
         "**Volume Profile POC**, **Weekly VWAP**, **RSI Divergences**, **Supertrend**, **MACD**, and **Bollinger Bands** for robust swing trade setups."
     )
 
-    if st.button(
-        "🚀 Run Weekly Higher-Timeframe MTF Scan", type="primary", use_container_width=True
-    ):
-        with st.spinner(
-            "Analyzing higher-timeframe supply/demand zones, volume profiles, and technical indicators..."
-        ):
+    if st.button("🚀 Run Weekly Higher-Timeframe MTF Scan", type="primary", use_container_width=True):
+        with st.spinner("Analyzing higher-timeframe supply/demand zones, volume profiles, and technical indicators..."):
             df_mtf = fetch_weekly_mtf_strategy(NIFTY_750_POOL, selected_count)
             st.session_state["df_mtf_strategy"] = df_mtf
             st.success("Weekly MTF scanning complete!")
 
-    if (
-        "df_mtf_strategy" in st.session_state
-        and not st.session_state["df_mtf_strategy"].empty
-    ):
-        df_display = st.session_state["df_mtf_strategy"]
-        render_native_table(df_display, key_prefix="weekly_mtf")
+    if "df_mtf_strategy" in st.session_state and not st.session_state["df_mtf_strategy"].empty:
+        render_native_table(st.session_state["df_mtf_strategy"], key_prefix="weekly_mtf")
     else:
-        st.info(
-            "Click the button above to run the Weekly Higher-Timeframe MTF Strategy scanner."
-        )
+        st.info("Click the button above to run the Weekly Higher-Timeframe MTF Strategy scanner.")
 
 # --- TAB 4: NEW DAILY MOMENTUM STRATEGY & BACKTEST ---
 with main_tab4:
@@ -1022,3 +1027,25 @@ with main_tab4:
             render_native_table(df_bt_res, key_prefix="daily_bt_tab")
         else:
             st.info("Click the button above to run historical backtesting.")
+
+# --- TAB 5: ELITE SWING STRATEGY (MTF TREND PULLBACK & DIP BUY) ---
+with main_tab5:
+    st.subheader("🎯 Elite Swing Strategy (Multi-Timeframe Trend Pullback & Dip Buy)")
+    st.markdown(
+        "Institutional swing framework scanning **Nifty 750** stocks for:\n"
+        "1. **Macro Uptrend Confirmation**: Daily price trading above the **50-day EMA**.\n"
+        "2. **Value Pullback Zone**: Price retracing near the 50 EMA value area.\n"
+        "3. **Healthy Momentum**: RSI cooling into the 40–65 range.\n"
+        "4. **Momentum Reversal**: MACD histogram ticking upward for exact swing entry triggers."
+    )
+
+    if st.button("🚀 Run Elite Swing Strategy Scan", type="primary", use_container_width=True):
+        with st.spinner("Scanning Nifty 750 pool for trend pullback & dip buy setups..."):
+            df_swing = fetch_elite_swing_strategy(NIFTY_750_POOL, selected_count)
+            st.session_state["df_elite_swing"] = df_swing
+            st.success("Elite swing scan complete!")
+
+    if "df_elite_swing" in st.session_state and not st.session_state["df_elite_swing"].empty:
+        render_native_table(st.session_state["df_elite_swing"], key_prefix="elite_swing_tab")
+    else:
+        st.info("Click the button above to run the Elite Swing Strategy scanner.")
