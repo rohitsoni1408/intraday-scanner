@@ -23,25 +23,26 @@ def send_telegram_alert(message):
 
 def process_symbol(sym):
     try:
-        # Fetching intraday 5-minute data
+        # Fetching live intraday 5-minute data dynamically
         ticker = yf.Ticker(sym)
         df = ticker.history(period="2d", interval="5m")
         if df.empty or len(df) < 15:
             return None
             
+        # Real-time calculation from live market candles
         cmp = round(float(df.iloc[-1]["Close"]), 2)
         prev_high = round(float(df.iloc[:-1]["High"].tail(10).max()), 2)
         recent_low = round(float(df.iloc[:-1]["Low"].tail(5).min()), 2)
         
         # Intraday rolling high breakout check
         if cmp > prev_high:
-            # Calculate Risk Management Levels
+            # Dynamic Risk Management Levels based on live price action
             entry_price = cmp
             stop_loss = recent_low if recent_low < entry_price else round(entry_price * 0.99, 2)
             risk = entry_price - stop_loss
             target = round(entry_price + (risk * 2), 2)  # 1:2 Risk-to-Reward ratio
             
-            # Clean symbol name for TradingView link (e.g. RELIANCE.NS -> NSE:RELIANCE)
+            # Clean symbol name for TradingView link (e.g., RELIANCE.NS -> NSE:RELIANCE)
             tv_symbol = sym.replace(".NS", "")
             chart_url = f"https://www.tradingview.com/chart/?symbol=NSE:{tv_symbol}"
             
@@ -61,7 +62,7 @@ def process_symbol(sym):
     return None
 
 def check_market():
-    # 300+ major NSE stock symbols watchlist
+    # Comprehensive list of major NSE stock symbols watchlist
     symbols = [
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "KOTAKBANK.NS", "LT.NS", "AXISBANK.NS",
         "HINDUNILVR.NS", "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS", "NTPC.NS", "ONGC.NS", "POWERGRID.NS", "TATASTEEL.NS",
