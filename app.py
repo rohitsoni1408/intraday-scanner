@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 import yfinance as yf
 
 # Page Configuration
@@ -71,7 +70,7 @@ def is_market_closed():
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **Rolling Institutional Breakouts**, **Live Auto-Refresh Alerts**, **VWAP Confluence**, and **Intraday RSI Divergence**."
+    "Trading Terminal featuring **Rolling Institutional Breakouts**, **VWAP Confluence**, and **Intraday RSI Divergence**."
 )
 
 # --- GLOBAL SCAN CONTROLS ---
@@ -241,7 +240,7 @@ def fetch_rolling_institutional_data(symbols):
                 else cmp
             )
 
-            # Rolling Session Channel Breakout (Checks highest high/lowest low of previous 12 candles to catch mid-day/afternoon institutional surges)
+            # Rolling Session Channel Breakout
             recent_candles = df_intraday.iloc[:-1].tail(12)
             rolling_high = round(float(recent_candles["High"].max()), 2)
             rolling_low = round(float(recent_candles["Low"].min()), 2)
@@ -379,7 +378,6 @@ def process_rolling_confluence(
         if cmp < 50.0:
             continue
 
-        # Institutional Breakout Rules (Rolling Channel + VWAP)
         is_bullish_breakout = (cmp > rolling_high) and (cmp > vwap)
         is_bearish_breakout = (cmp < rolling_low) and (cmp < vwap)
 
@@ -786,41 +784,27 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
 
 active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
-# --- TAB 1: INTRADAY ENGINE (AUTO-REFRESH + ROLLING INSTITUTIONAL BREAKOUT) ---
+# --- TAB 1: INTRADAY ENGINE (ROLLING INSTITUTIONAL BREAKOUT) ---
 with main_tab1:
-    st.subheader("⚡ Live Automated Intraday Engine (Rolling Breakout + VWAP)")
+    st.subheader("⚡ Live Intraday Engine (Rolling Breakout + VWAP)")
     
     col_ctrl1, col_ctrl2 = st.columns([2, 1])
     with col_ctrl1:
-        auto_scan_live = st.checkbox("🟢 Enable Live Auto-Refresh & Instant Toast Alerts (Every 30 Sec)")
+        st.markdown("Click the scan button below to retrieve live mid-day institutional breakouts instantly.")
     with col_ctrl2:
         post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed())
 
-    if auto_scan_live and not is_market_closed():
-        st_autorefresh(interval=30000, key="live_market_scanner")
-        with st.spinner("🔄 Scanning live market for mid-day institutional breakouts..."):
+    if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
+        with st.spinner("Scanning Nifty Universe for Institutional Triggers..."):
             raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
             df_b, df_s = process_rolling_confluence(
-                raw_stocks, selected_count, active_universe_pool, force_post_market=False
+                raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
             )
             if not df_b.empty:
                 top_stock = df_b.iloc[0]["Symbol"]
                 st.toast(f"🚨 INTRADAY BUY ALERT: {top_stock} triggered an institutional breakout!", icon="🔥")
-
             st.session_state["df_b_master"] = df_b
             st.session_state["df_s_master"] = df_s
-    else:
-        if st.button("🚀 Run Manual Intraday Scan", type="primary", use_container_width=True):
-            with st.spinner("Scanning Nifty Universe..."):
-                raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-                df_b, df_s = process_rolling_confluence(
-                    raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
-                )
-                if not df_b.empty:
-                    top_stock = df_b.iloc[0]["Symbol"]
-                    st.toast(f"🚨 INTRADAY BUY ALERT: {top_stock} triggered an institutional breakout!", icon="🔥")
-                st.session_state["df_b_master"] = df_b
-                st.session_state["df_s_master"] = df_s
 
     if "df_b_master" not in st.session_state:
         empty_b, empty_s = process_rolling_confluence(
@@ -839,14 +823,14 @@ with main_tab1:
         if not df_b.empty:
             render_native_table(df_b, key_prefix="intra_buy")
         else:
-            st.info("Enable auto-refresh or click manual scan to view intraday setups.")
+            st.info("Click 'Run Intraday Scan' to view intraday setups.")
 
     with sub_tab_sell:
         df_s = st.session_state["df_s_master"]
         if not df_s.empty:
             render_native_table(df_s, key_prefix="intra_sell")
         else:
-            st.info("Enable auto-refresh or click manual scan to view intraday setups.")
+            st.info("Click 'Run Intraday Scan' to view intraday setups.")
 
 # --- TAB 2: INTRADAY BACKTESTER ---
 with main_tab2:
