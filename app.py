@@ -57,7 +57,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 # --- MAIN APP ---
-st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 500 Universe)")
+st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 750 Universe)")
 st.markdown(
     "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen"
     " Symbol Column**, **Intraday RSI Divergence**, **Exceptional Volume Filter**, and **Advanced Higher Timeframe (Weekly/Monthly) Supply-Demand MTF Strategy**."
@@ -66,15 +66,15 @@ st.markdown(
 main_tab1, main_tab2, main_tab3 = st.tabs([
     "⚡ Intraday Engine (Tight SL + 5m RSI Div + Exceptional Volume)",
     "📊 Precision Intraday Backtester Engine",
-    "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Multi-Indicator Confluence)",
+    "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Daily RSI>55 + MACD Crossover)",
 ])
 
 
-# --- DYNAMIC TOP NIFTY 500 UNIVERSE FETCH ENGINE ---
+# --- DYNAMIC TOP NIFTY 750 UNIVERSE FETCH ENGINE ---
 @st.cache_data(ttl=86400)
-def load_nifty_500_symbols():
-    """Fetches the official Nifty 500 stock universe from NSE CSV."""
-    url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+def load_nifty_750_symbols():
+    """Fetches the official Nifty 750 stock universe from NSE CSV."""
+    url = "https://archives.nseindia.com/content/indices/ind_nifty750list.csv"
     try:
         df = pd.read_csv(url)
         symbols = df["Symbol"].dropna().str.strip().tolist()
@@ -104,7 +104,7 @@ def load_nifty_500_symbols():
         ]
 
 
-NIFTY_500_POOL = load_nifty_500_symbols()
+NIFTY_750_POOL = load_nifty_750_symbols()
 DEFAULT_SCAN_CLAUSE = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 100000 and [0] 15 minute close > 50 ) )"
 
 
@@ -325,7 +325,7 @@ def process_ultimate_confluence(
         if item.get("nsecode", item.get("symbol", ""))
     ]
     active_symbols = list(
-        dict.fromkeys(extracted_symbols + NIFTY_500_POOL[:40])
+        dict.fromkeys(extracted_symbols + NIFTY_750_POOL[:40])
     )
 
     live_prices = fetch_live_market_data(active_symbols)
@@ -457,7 +457,7 @@ def process_ultimate_confluence(
     return df_buy, df_sell
 
 
-# --- ADVANCED WEEKLY MTF ENGINE (NIFTY 500) ---
+# --- ADVANCED WEEKLY MTF ENGINE (NIFTY 750) ---
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols, top_n_count):
     results = []
@@ -469,14 +469,22 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             ticker = yf.Ticker(ticker_sym)
             df_weekly = ticker.history(period="2y", interval="1wk")
             df_monthly = ticker.history(period="5y", interval="1mo")
+            df_daily = ticker.history(period="6mo", interval="1d")
 
-            if len(df_weekly) < 30 or len(df_monthly) < 12:
+            if len(df_weekly) < 30 or len(df_monthly) < 12 or len(df_daily) < 30:
                 continue
 
             cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
 
+            # Daily RSI > 55 filter condition
+            daily_rsi_series = compute_rsi(df_daily["Close"], period=14)
+            curr_daily_rsi = float(daily_rsi_series.iloc[-1])
+            if curr_daily_rsi <= 55:
+                continue
+
+            # Weekly VWAP calculation
             weekly_vol_sum = df_weekly["Volume"].tail(12).sum()
             weekly_vwap = (
                 round(
@@ -515,6 +523,7 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
                 and (curr_rsi < 65)
             )
 
+            # MACD Crossover and favorable VWAP check
             macd, signal, hist = compute_macd(df_weekly["Close"])
             curr_hist = float(hist.iloc[-1])
             prev_hist = float(hist.iloc[-2])
@@ -536,8 +545,8 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             exceptional_volume = df_weekly["Volume"].iloc[-1] > (df_weekly["Volume"].tail(12).mean() * 1.2)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
 
-            if (bullish_rsi_div or macd_bullish_cross or supertrend_signal) and (is_near_demand or bb_confluence) and exceptional_volume:
-                setup_type = "STRONG BUY (Higher Timeframe Supply/Demand + MTF Confluence)"
+            if macd_bullish_cross and cmp >= weekly_vwap and (bullish_rsi_div or supertrend_signal) and (is_near_demand or bb_confluence) and exceptional_volume:
+                setup_type = "STRONG BUY (Weekly MACD Crossover + Daily RSI>55 + MTF Confluence)"
                 entry = cmp
                 
                 recent_weekly_low = float(df_weekly["Low"].iloc[-1])
@@ -559,17 +568,14 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             results.append({
                 "Symbol": clean_sym,
                 "Signal": "BUY",
-                "Weekly Close (₹)": f"₹{cmp}",
-                "Weekly VWAP (₹)": f"₹{weekly_vwap}",
-                "Volume POC (₹)": f"₹{vol_poc}",
-                "Demand Zone (₹)": f"₹{best_demand_zone}",
-                "Supply Zone (₹)": f"₹{best_supply_zone}",
-                "Weekly RSI": curr_rsi,
-                "Strategy Setup": setup_type,
+                "Current Price (₹)": f"₹{cmp}",
                 "Tight Entry (₹)": f"₹{entry}",
                 "Small SL (₹)": f"₹{sl}",
                 "Target 1 (₹)": f"₹{t1}",
                 "Target 2 (₹)": f"₹{t2}",
+                "Weekly VWAP (₹)": f"₹{weekly_vwap}",
+                "Daily RSI": round(curr_daily_rsi, 2),
+                "Strategy Setup": setup_type,
                 "RawVolume": df_weekly["Volume"].iloc[-1],
                 "Chart": chart_link,
             })
@@ -590,7 +596,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
         for item in raw_stocks
         if item.get("nsecode", item.get("symbol", ""))
     ]
-    stock_list = list(dict.fromkeys(extracted_symbols + NIFTY_500_POOL[:20]))[
+    stock_list = list(dict.fromkeys(extracted_symbols + NIFTY_750_POOL[:20]))[
         : top_n_count * 2
     ]
     results = []
@@ -720,7 +726,7 @@ with col_info:
         else "🟢 OPEN (Live Scanning Active)"
     )
     st.info(
-        f"Market Status: **{market_status}** | Universe: **Top Nifty 500"
+        f"Market Status: **{market_status}** | Universe: **Top Nifty 750"
         " Stocks**"
     )
 with col_slider:
@@ -745,7 +751,7 @@ with main_tab1:
     if st.button(
         "🚀 Run Intraday Engine Scan", type="primary", use_container_width=True
     ):
-        with st.spinner("Scanning Nifty 500 stocks for intraday setups..."):
+        with st.spinner("Scanning Nifty 750 stocks for intraday setups..."):
             raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
             df_b, df_s = process_ultimate_confluence(
                 raw_stocks, selected_count, force_post_market=post_market_toggle
@@ -790,7 +796,7 @@ with main_tab2:
 
     if st.button("🚀 Run Intraday Backtest", type="primary"):
         with st.spinner(
-            "Executing backtest over Nifty 500 intraday candles..."
+            "Executing backtest over Nifty 750 intraday candles..."
         ):
             df_bt = run_live_backtest(
                 backtest_date, DEFAULT_SCAN_CLAUSE, selected_count
@@ -835,11 +841,11 @@ with main_tab2:
 # --- TAB 3: WEEKLY HIGHER-TIMEFRAME MTF STRATEGY ---
 with main_tab3:
     st.subheader(
-        "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Multi-Indicator Confluence)"
+        "🗓️ Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Daily RSI>55 + MACD Crossover)"
     )
     st.markdown(
-        "Multi-timeframe engine scanning **Top 500 Nifty stocks** leveraging **Weekly and Monthly Supply & Demand zones**, "
-        "**Volume Profile POC**, **Weekly VWAP**, **RSI Divergences**, **Supertrend**, **MACD**, and **Bollinger Bands** for robust swing trade setups."
+        "Multi-timeframe engine scanning **Top 750 Nifty stocks** leveraging **Weekly and Monthly Supply & Demand zones**, "
+        "**Volume Profile POC**, **Weekly VWAP**, **Daily RSI > 55 Filter**, **MACD Crossover**, **Supertrend**, and **Bollinger Bands** for robust swing trade setups."
     )
 
     if st.button(
@@ -848,7 +854,7 @@ with main_tab3:
         with st.spinner(
             "Analyzing higher-timeframe supply/demand zones, volume profiles, and technical indicators..."
         ):
-            df_mtf = fetch_weekly_mtf_strategy(NIFTY_500_POOL, selected_count)
+            df_mtf = fetch_weekly_mtf_strategy(NIFTY_750_POOL, selected_count)
             st.session_state["df_mtf_strategy"] = df_mtf
             st.success("Weekly MTF scanning complete!")
 
