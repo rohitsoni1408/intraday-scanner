@@ -477,7 +477,7 @@ def process_rolling_confluence(
     return df_buy, df_sell
 
 
-# --- STRATEGY FUNCTIONS FOR TAB 3 (UNTOUCHED) ---
+# --- STRATEGY FUNCTIONS FOR TAB 3 ---
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols, top_n_count):
     results = []
@@ -683,6 +683,80 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
     return df_res
 
 
+def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_pool):
+    results = []
+    start_dt = datetime.combine(target_date, datetime.min.time())
+    
+    for sym in universe_pool[:top_n_count*2]:
+        clean_sym = sym.upper().strip()
+        ticker_sym = f"{clean_sym}.NS"
+        try:
+            ticker = yf.Ticker(ticker_sym)
+            df_weekly = ticker.history(period="2y", interval="1wk")
+            if df_weekly.empty or len(df_weekly) < 20:
+                continue
+            
+            if df_weekly.index.tz is not None:
+                df_weekly.index = df_weekly.index.tz_localize(None)
+                
+            df_hist = df_weekly[df_weekly.index <= pd.Timestamp(start_dt)]
+            if len(df_hist) < 15:
+                continue
+                
+            entry_price = round(float(df_hist.iloc[-1]["Close"]), 2)
+            if entry_price < 50.0:
+                continue
+                
+            sl = round(float(df_hist["Low"].iloc[-1]) * 0.96, 2)
+            risk = entry_price - sl
+            if risk <= 0:
+                continue
+            t1 = round(entry_price + (risk * 1.5), 2)
+            t2 = round(entry_price + (risk * 3.0), 2)
+            
+            df_future = df_weekly[df_weekly.index > pd.Timestamp(start_dt)].head(8)
+            if df_future.empty:
+                continue
+                
+            max_future_high = df_future["High"].max()
+            min_future_low = df_future["Low"].min()
+            final_future_close = df_future.iloc[-1]["Close"]
+            
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+            
+            if max_future_high >= t2:
+                status, pnl_val, win_prob = ("🎯 Target 2 Hit", round(((t2 - entry_price) / entry_price) * 100, 2), "100%")
+            elif max_future_high >= t1:
+                status, pnl_val, win_prob = ("🎯 Target 1 Hit", round(((t1 - entry_price) / entry_price) * 100, 2), "100%")
+            elif min_future_low <= sl:
+                status, pnl_val, win_prob = ("🛑 SL Hit", round(((sl - entry_price) / entry_price) * 100, 2), "0%")
+            else:
+                pnl = round(((final_future_close - entry_price) / entry_price) * 100, 2)
+                status, pnl_val, win_prob = ("⏳ Active / Closed", pnl, "50%")
+
+            results.append({
+                "Symbol": clean_sym,
+                "Signal": "SWING BUY",
+                "Win Probability (%)": win_prob,
+                "Entry Date": target_date.strftime("%Y-%m-%d"),
+                "Entry Price (₹)": f"₹{entry_price}",
+                "Stop Loss (₹)": f"₹{sl}",
+                "Target 1 (₹)": f"₹{t1}",
+                "Target 2 (₹)": f"₹{t2}",
+                "Status": status,
+                "P&L (%)": f"{pnl_val:+.2f}%",
+                "RawPnL": pnl_val,
+                "Chart": chart_link,
+            })
+            
+            if len(results) >= top_n_count:
+                break
+        except Exception:
+            continue
+            
+    return pd.DataFrame(results)
+
+
 # --- BACKTEST ENGINE FOR INTRADAY ---
 def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
     raw_stocks = fetch_chartink_stocks(scan_clause)
@@ -869,11 +943,12 @@ with main_tab2:
     else:
         st.info("Select a date and click the button above to run backtesting.")
 
-# --- TAB 3: WEEKLY & SWING STRATEGY HUB (UNTOUCHED) ---
+# --- TAB 3: WEEKLY & SWING STRATEGY HUB & BACKTESTER ---
 with main_tab3:
-    st.subheader("🗓️ Weekly & Swing Strategy Hub")
-    st.markdown("Select your desired strategy from the dropdown below and execute a scan across your chosen Nifty universe size.")
-
+    st.subheader("🗓️ Weekly & Swing Strategy Hub & Backtester")
+    
+    strat_mode = st.radio("Select Mode:", ["Live Strategy Scanner", "Weekly / Swing Backtester"], horizontal=True)
+    
     selected_strategy = st.selectbox(
         "Choose Weekly / Swing Strategy:",
         [
@@ -883,19 +958,45 @@ with main_tab3:
         ]
     )
 
-    if st.button("🚀 Run Selected Strategy Scan", type="primary", use_container_width=True):
-        with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_strategy}..."):
-            if "Weekly Higher-Timeframe" in selected_strategy:
-                df_res = fetch_weekly_mtf_strategy(active_universe_pool, selected_count)
-            elif "Daily Momentum" in selected_strategy:
-                df_res = fetch_daily_momentum_strategy(active_universe_pool, selected_count)
-            else:
-                df_res = fetch_elite_swing_strategy(active_universe_pool, selected_count)
+    if strat_mode == "Live Strategy Scanner":
+        if st.button("🚀 Run Selected Strategy Scan", type="primary", use_container_width=True):
+            with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_strategy}..."):
+                if "Weekly Higher-Timeframe" in selected_strategy:
+                    df_res = fetch_weekly_mtf_strategy(active_universe_pool, selected_count)
+                elif "Daily Momentum" in selected_strategy:
+                    df_res = fetch_daily_momentum_strategy(active_universe_pool, selected_count)
+                else:
+                    df_res = fetch_elite_swing_strategy(active_universe_pool, selected_count)
 
-            st.session_state["df_dropdown_strategy"] = df_res
-            st.success("Scan completed successfully!")
+                st.session_state["df_dropdown_strategy"] = df_res
+                st.success("Scan completed successfully!")
 
-    if "df_dropdown_strategy" in st.session_state and not st.session_state["df_dropdown_strategy"].empty:
-        render_native_table(st.session_state["df_dropdown_strategy"], key_prefix="dropdown_strategy_tab")
-    else:
-        st.info("Select a strategy above and click the button to view results.")
+        if "df_dropdown_strategy" in st.session_state and not st.session_state["df_dropdown_strategy"].empty:
+            render_native_table(st.session_state["df_dropdown_strategy"], key_prefix="dropdown_strategy_tab")
+        else:
+            st.info("Select a strategy above and click the button to view live signals.")
+            
+    else:  # Backtester Mode
+        bt_weekly_date = st.date_input("📅 Select Historical Weekly Entry Date", value=datetime.today().date() - timedelta(days=90))
+        if st.button("🚀 Run Weekly Strategy Backtest", type="primary", use_container_width=True):
+            with st.spinner("Backtesting weekly historical setups over subsequent weeks..."):
+                df_wk_bt = run_weekly_backtest(bt_weekly_date, selected_strategy, selected_count, active_universe_pool)
+                st.session_state["df_weekly_bt_results"] = df_wk_bt
+
+        if "df_weekly_bt_results" in st.session_state and not st.session_state["df_weekly_bt_results"].empty:
+            df_wk_bt = st.session_state["df_weekly_bt_results"]
+            
+            total_trades = len(df_wk_bt)
+            wins = len(df_wk_bt[df_wk_bt["Status"].str.contains("Target", na=False)])
+            win_rate = round((wins / total_trades) * 100, 2) if total_trades > 0 else 0.0
+            total_pnl = round(df_wk_bt["RawPnL"].sum(), 2)
+
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("Total Backtested Setups", total_trades)
+            col_m2.metric("Win Rate", f"{win_rate}%")
+            col_m3.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
+            st.markdown("---")
+            
+            render_native_table(df_wk_bt, key_prefix="weekly_backtest")
+        else:
+            st.info("Select a historical date and run the backtest to view weekly performance metrics.")
