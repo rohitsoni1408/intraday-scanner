@@ -35,27 +35,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- PASSCODE AUTHENTICATION ---
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("### 🔒 Secure Terminal")
-        st.markdown("Enter your security passcode to access elite trade flows.")
-        passcode_input = st.text_input("Passcode:", type="password")
-        if st.button(
-            "🔓 Authenticate Terminal", type="primary", use_container_width=True
-        ):
-            if passcode_input == "Ginni":
-                st.session_state.authenticated = True
-                st.rerun()
-            else:
-                st.error("Incorrect passcode. Access denied.")
-    st.stop()
-
 
 # --- MARKET STATUS HELPER ---
 def is_market_closed():
