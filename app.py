@@ -63,6 +63,34 @@ st.markdown(
     "Symbol Column**, **Intraday RSI Divergence**, **Win Probability (%)**, and customizable **Scan Universe Size**."
 )
 
+# --- GLOBAL SCAN CONTROLS (PLACED ABOVE SCAN OPTIONS) ---
+st.subheader("⚙️ Master Scan Configuration")
+col_info, col_slider1, col_slider2 = st.columns([2, 1, 1])
+
+with col_info:
+    market_status = (
+        "🔴 CLOSED (Post-Market Mode Active)"
+        if is_market_closed() if 'is_market_closed' in globals() else False # handled below
+        else "🟢 OPEN (Live Scanning Active)"
+    )
+    # Market status will be evaluated properly with function defined below
+with col_slider1:
+    selected_count = st.slider(
+        "Output Stock Count:",
+        min_value=3,
+        max_value=25,
+        value=10,
+        step=1,
+    )
+with col_slider2:
+    universe_limit = st.selectbox(
+        "Scan Universe Size (Top Nifty):",
+        options=[50, 100, 200, 500, 750],
+        index=2,  # Defaults to Top 200 for optimal speed
+    )
+
+st.markdown("---")
+
 main_tab1, main_tab2, main_tab3 = st.tabs([
     "⚡ Intraday Engine",
     "📊 Intraday Backtester",
@@ -758,35 +786,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
     return pd.DataFrame(results)
 
 
-# --- CONTROLS ---
-st.subheader("⚙️ Master Engine Controls")
-col_info, col_slider1, col_slider2 = st.columns([2, 1, 1])
-
-with col_info:
-    market_status = (
-        "🔴 CLOSED (Post-Market Mode Active)"
-        if is_market_closed()
-        else "🟢 OPEN (Live Scanning Active)"
-    )
-    st.info(f"Market Status: **{market_status}**")
-with col_slider1:
-    selected_count = st.slider(
-        "Output Stock Count:",
-        min_value=3,
-        max_value=25,
-        value=10,
-        step=1,
-    )
-with col_slider2:
-    universe_limit = st.selectbox(
-        "Scan Universe Size (Top Nifty):",
-        options=[50, 100, 200, 500, 750],
-        index=2,  # Defaults to Top 200 for optimal speed
-    )
-
 active_universe_pool = NIFTY_750_POOL[:universe_limit]
-
-st.markdown("---")
 
 # --- TAB 1: INTRADAY ENGINE ---
 with main_tab1:
