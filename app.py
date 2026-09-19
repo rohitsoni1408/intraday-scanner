@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 import yfinance as yf
 
 # Page Configuration
@@ -57,7 +58,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 
-# --- MARKET STATUS HELPER (Defined early so it can be referenced safely) ---
+# --- MARKET STATUS HELPER ---
 def is_market_closed():
     now = datetime.now()
     if now.weekday() >= 5:
@@ -70,11 +71,10 @@ def is_market_closed():
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen "
-    "Symbol Column**, **Intraday RSI Divergence**, **Win Probability (%)**, and customizable **Scan Universe Size**."
+    "Trading Terminal featuring **Rolling Institutional Breakouts**, **Live Auto-Refresh Alerts**, **VWAP Confluence**, and **Intraday RSI Divergence**."
 )
 
-# --- GLOBAL SCAN CONTROLS (PLACED ABOVE SCAN OPTIONS) ---
+# --- GLOBAL SCAN CONTROLS ---
 st.subheader("⚙️ Master Scan Configuration")
 col_info, col_slider1, col_slider2 = st.columns([2, 1, 1])
 
@@ -98,19 +98,19 @@ with col_slider2:
     universe_limit = st.selectbox(
         "Scan Universe Size (Top Nifty):",
         options=[50, 100, 200, 500, 750],
-        index=2,  # Defaults to Top 200 for optimal speed
+        index=2,
     )
 
 st.markdown("---")
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
-    "⚡ Intraday Engine",
+    "⚡ Intraday Engine (Live & Rolling)",
     "📊 Intraday Backtester",
     "🗓️ Weekly & Swing Strategy Hub"
 ])
 
 
-# --- DYNAMIC TOP NIFTY 750 UNIVERSE FETCH ENGINE ---
+# --- DYNAMIC TOP NIFTY UNIVERSE FETCH ENGINE ---
 @st.cache_data(ttl=86400)
 def load_nifty_750_symbols():
     url_500 = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
@@ -198,9 +198,9 @@ def compute_volume_profile_poc(df, bins=15):
     return round(float(poc_price), 2)
 
 
-# --- DATA FETCHERS ---
+# --- ROLLING INSTITUTIONAL DATA FETCHERS ---
 @st.cache_data(ttl=15)
-def fetch_live_market_data(symbols):
+def fetch_rolling_institutional_data(symbols):
     data_dict = {}
     for sym in symbols:
         clean_sym = sym.upper().strip()
@@ -227,13 +227,12 @@ def fetch_live_market_data(symbols):
             )
             volume = int(df_intraday["Volume"].sum())
 
+            # Session VWAP
             total_vol = df_intraday["Volume"].sum()
             vwap = (
                 round(
                     float(
-                        (
-                            df_intraday["Close"] * df_intraday["Volume"]
-                        ).sum()
+                        (df_intraday["Close"] * df_intraday["Volume"]).sum()
                         / total_vol
                     ),
                     2,
@@ -242,11 +241,18 @@ def fetch_live_market_data(symbols):
                 else cmp
             )
 
+            # Rolling Session Channel Breakout (Checks highest high/lowest low of previous 12 candles to catch mid-day/afternoon institutional surges)
+            recent_candles = df_intraday.iloc[:-1].tail(12)
+            rolling_high = round(float(recent_candles["High"].max()), 2)
+            rolling_low = round(float(recent_candles["Low"].min()), 2)
+
+            # Volume Confluence check
             vol_ma = df_intraday["Volume"].rolling(window=20).mean()
             curr_candle_vol = float(df_intraday["Volume"].iloc[-1])
             avg_vol_ma = float(vol_ma.iloc[-1]) if not vol_ma.empty and not pd.isna(vol_ma.iloc[-1]) else 0.0
             exceptional_vol = curr_candle_vol > (avg_vol_ma * 1.5) if avg_vol_ma > 0 else False
 
+            # 5m RSI Divergence Confluence
             rsi_5m = compute_rsi(df_intraday["Close"], period=14)
             curr_rsi = float(rsi_5m.iloc[-1])
             prev_rsi = float(rsi_5m.iloc[-6])
@@ -268,6 +274,8 @@ def fetch_live_market_data(symbols):
                 "day_high": day_high,
                 "day_low": day_low,
                 "vwap": vwap,
+                "rolling_high": rolling_high,
+                "rolling_low": rolling_low,
                 "exceptional_vol": exceptional_vol,
                 "rsi_bull_div": intra_bull_div,
                 "rsi_bear_div": intra_bear_div,
@@ -329,8 +337,8 @@ def render_native_table(df, key_prefix):
     )
 
 
-# --- INTRADAY ENGINE ---
-def process_ultimate_confluence(
+# --- ROLLING BREAKOUT & INSTITUTIONAL CONFLUENCE ENGINE ---
+def process_rolling_confluence(
     stock_data, top_n_count, universe_pool, force_post_market=False
 ):
     buy_list, sell_list = [], []
@@ -343,8 +351,7 @@ def process_ultimate_confluence(
         dict.fromkeys(extracted_symbols + universe_pool)
     )
 
-    live_prices = fetch_live_market_data(active_symbols)
-    closed = force_post_market or is_market_closed()
+    live_prices = fetch_rolling_institutional_data(active_symbols)
 
     for symbol in active_symbols:
         live_info = live_prices.get(symbol)
@@ -362,6 +369,7 @@ def process_ultimate_confluence(
             live_info["day_low"],
             live_info["vwap"],
         )
+        rolling_high, rolling_low = live_info["rolling_high"], live_info["rolling_low"]
         exceptional_vol = live_info["exceptional_vol"]
         rsi_bull_div, rsi_bear_div = (
             live_info["rsi_bull_div"],
@@ -370,68 +378,42 @@ def process_ultimate_confluence(
 
         if cmp < 50.0:
             continue
-        diff = day_high - day_low
 
-        if not closed:
-            if pct_change >= 0:
-                fib_786 = round(day_high - (diff * 0.786), 2)
-                entry_price = round(max(fib_786, vwap), 2)
-                sl = round(entry_price * 0.996, 2)
-                t1 = round(entry_price + (entry_price * 0.012), 2)
-                t2 = round(day_high, 2)
-            else:
-                fib_786 = round(day_low + (diff * 0.786), 2)
-                entry_price = round(min(fib_786, vwap), 2)
-                sl = round(entry_price * 1.004, 2)
-                t1 = round(entry_price - (entry_price * 0.012), 2)
-                t2 = round(day_low, 2)
-        else:
-            if pct_change >= 0:
-                entry_price = round(day_high - (diff * 0.50), 2)
-                sl = round(entry_price * 0.994, 2)
-                t1 = round(day_high, 2)
-                t2 = round(day_high + (diff * 0.382), 2)
-            else:
-                entry_price = round(day_low + (diff * 0.50), 2)
-                sl = round(entry_price * 1.006, 2)
-                t1 = round(day_low, 2)
-                t2 = round(day_low - (diff * 0.382), 2)
+        # Institutional Breakout Rules (Rolling Channel + VWAP)
+        is_bullish_breakout = (cmp > rolling_high) and (cmp > vwap)
+        is_bearish_breakout = (cmp < rolling_low) and (cmp < vwap)
 
-        red_reasons, green_reasons = [], []
-        base_prob = 58
-        if abs(pct_change) > 4.5:
-            red_reasons.append("Extended Move (>4.5%)")
-            base_prob -= 8
-        if volume < 200000:
-            red_reasons.append("Low Volume Liquidity")
-            base_prob -= 10
+        base_prob = 62
+        reasons = []
 
-        if 1.0 <= abs(pct_change) <= 3.5:
-            green_reasons.append("Healthy Momentum")
-            base_prob += 8
         if exceptional_vol:
-            green_reasons.append("🔥 Exceptional Volume Spike")
-            base_prob += 12
-        if rsi_bull_div and pct_change >= 0:
-            green_reasons.append("5m RSI Bullish Divergence")
-            base_prob += 10
-        if rsi_bear_div and pct_change < 0:
-            green_reasons.append("5m RSI Bearish Divergence")
-            base_prob += 10
+            base_prob += 15
+            reasons.append("🔥 High Volume Institutional Spike")
 
-        win_prob = min(max(base_prob, 45), 92)
-        chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
+        if is_bullish_breakout:
+            if rsi_bull_div:
+                base_prob += 10
+                reasons.append("5m RSI Divergence")
+            if 0.8 <= pct_change <= 4.0:
+                base_prob += 5
+                reasons.append("Active Momentum")
 
-        if pct_change >= 0:
-            status_tag = f"BUY ({', '.join(green_reasons) if green_reasons else 'STRONG MOMENTUM'})"
-            stock_entry = {
+            win_prob = min(base_prob, 95)
+            entry_price = cmp
+            sl = round(min(rolling_low, entry_price * 0.995), 2)
+            risk = entry_price - sl
+            t1 = round(entry_price + (risk * 1.5), 2)
+            t2 = round(entry_price + (risk * 3.0), 2)
+
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
+
+            buy_list.append({
                 "Symbol": symbol,
-                "Signal": "BUY",
+                "Signal": "BUY (Institutional Breakout)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Risk Analysis": status_tag,
-                "Session Open (₹)": f"₹{day_open}",
-                "Session High (₹)": f"₹{day_high}",
-                "Session Low (₹)": f"₹{day_low}",
+                "Confluence Reasons": ", ".join(reasons) if reasons else "Rolling Breakout + VWAP",
+                "Rolling High (₹)": f"₹{rolling_high}",
+                "Rolling Low (₹)": f"₹{rolling_low}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
                 "VWAP (₹)": f"₹{vwap}",
                 "Tight Entry (₹)": f"₹{entry_price}",
@@ -442,18 +424,32 @@ def process_ultimate_confluence(
                 "RawVolume": volume,
                 "RawWinProb": win_prob,
                 "Chart": chart_link,
-            }
-            buy_list.append(stock_entry)
-        else:
-            status_tag = f"SELL ({', '.join(red_reasons) if red_reasons else 'WEAK STRUCTURE'})"
-            stock_entry = {
+            })
+
+        elif is_bearish_breakout:
+            if rsi_bear_div:
+                base_prob += 10
+                reasons.append("5m RSI Divergence")
+            if -4.0 <= pct_change <= -0.8:
+                base_prob += 5
+                reasons.append("Heavy Selling Pressure")
+
+            win_prob = min(base_prob, 95)
+            entry_price = cmp
+            sl = round(max(rolling_high, entry_price * 1.005), 2)
+            risk = sl - entry_price
+            t1 = round(entry_price - (risk * 1.5), 2)
+            t2 = round(entry_price - (risk * 3.0), 2)
+
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
+
+            sell_list.append({
                 "Symbol": symbol,
-                "Signal": "SELL",
+                "Signal": "SELL (Institutional Breakdown)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Risk Analysis": status_tag,
-                "Session Open (₹)": f"₹{day_open}",
-                "Session High (₹)": f"₹{day_high}",
-                "Session Low (₹)": f"₹{day_low}",
+                "Confluence Reasons": ", ".join(reasons) if reasons else "Rolling Breakdown + VWAP",
+                "Rolling High (₹)": f"₹{rolling_high}",
+                "Rolling Low (₹)": f"₹{rolling_low}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
                 "VWAP (₹)": f"₹{vwap}",
                 "Tight Entry (₹)": f"₹{entry_price}",
@@ -464,8 +460,7 @@ def process_ultimate_confluence(
                 "RawVolume": volume,
                 "RawWinProb": win_prob,
                 "Chart": chart_link,
-            }
-            sell_list.append(stock_entry)
+            })
 
     df_buy = (
         pd.DataFrame(buy_list)
@@ -484,7 +479,7 @@ def process_ultimate_confluence(
     return df_buy, df_sell
 
 
-# --- STRATEGY FUNCTIONS FOR THE DROPDOWN ---
+# --- STRATEGY FUNCTIONS FOR TAB 3 (UNTOUCHED) ---
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols, top_n_count):
     results = []
@@ -791,34 +786,52 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
 
 active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
-# --- TAB 1: INTRADAY ENGINE ---
+# --- TAB 1: INTRADAY ENGINE (AUTO-REFRESH + ROLLING INSTITUTIONAL BREAKOUT) ---
 with main_tab1:
-    st.subheader("⚡ Intraday Engine (Tight SL + 5m RSI Div + Exceptional Volume)")
-    post_market_toggle = st.checkbox(
-        "Force Post-Market Next-Session Calculation Mode",
-        value=is_market_closed(),
-    )
+    st.subheader("⚡ Live Automated Intraday Engine (Rolling Breakout + VWAP)")
+    
+    col_ctrl1, col_ctrl2 = st.columns([2, 1])
+    with col_ctrl1:
+        auto_scan_live = st.checkbox("🟢 Enable Live Auto-Refresh & Instant Toast Alerts (Every 30 Sec)")
+    with col_ctrl2:
+        post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed())
 
-    if st.button("🚀 Run Intraday Engine Scan", type="primary", use_container_width=True):
-        with st.spinner(f"Scanning Top {universe_limit} Nifty stocks for intraday setups..."):
+    if auto_scan_live and not is_market_closed():
+        st_autorefresh(interval=30000, key="live_market_scanner")
+        with st.spinner("🔄 Scanning live market for mid-day institutional breakouts..."):
             raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-            df_b, df_s = process_ultimate_confluence(
-                raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
+            df_b, df_s = process_rolling_confluence(
+                raw_stocks, selected_count, active_universe_pool, force_post_market=False
             )
+            if not df_b.empty:
+                top_stock = df_b.iloc[0]["Symbol"]
+                st.toast(f"🚨 INTRADAY BUY ALERT: {top_stock} triggered an institutional breakout!", icon="🔥")
+
             st.session_state["df_b_master"] = df_b
             st.session_state["df_s_master"] = df_s
-            st.success("Intraday setups generated!")
+    else:
+        if st.button("🚀 Run Manual Intraday Scan", type="primary", use_container_width=True):
+            with st.spinner("Scanning Nifty Universe..."):
+                raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
+                df_b, df_s = process_rolling_confluence(
+                    raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
+                )
+                if not df_b.empty:
+                    top_stock = df_b.iloc[0]["Symbol"]
+                    st.toast(f"🚨 INTRADAY BUY ALERT: {top_stock} triggered an institutional breakout!", icon="🔥")
+                st.session_state["df_b_master"] = df_b
+                st.session_state["df_s_master"] = df_s
 
     if "df_b_master" not in st.session_state:
-        empty_b, empty_s = process_ultimate_confluence(
+        empty_b, empty_s = process_rolling_confluence(
             [], selected_count, active_universe_pool, force_post_market=post_market_toggle
         )
         st.session_state["df_b_master"] = empty_b
         st.session_state["df_s_master"] = empty_s
 
     sub_tab_buy, sub_tab_sell = st.tabs([
-        f"🟢 Top {selected_count} Long Setups",
-        f"🔴 Top {selected_count} Short Setups",
+        f"🟢 Top {selected_count} Long Institutional Breakouts",
+        f"🔴 Top {selected_count} Short Institutional Breakdowns",
     ])
 
     with sub_tab_buy:
@@ -826,14 +839,14 @@ with main_tab1:
         if not df_b.empty:
             render_native_table(df_b, key_prefix="intra_buy")
         else:
-            st.info("Click the button above to run the intraday scanner.")
+            st.info("Enable auto-refresh or click manual scan to view intraday setups.")
 
     with sub_tab_sell:
         df_s = st.session_state["df_s_master"]
         if not df_s.empty:
             render_native_table(df_s, key_prefix="intra_sell")
         else:
-            st.info("Click the button above to run the intraday scanner.")
+            st.info("Enable auto-refresh or click manual scan to view intraday setups.")
 
 # --- TAB 2: INTRADAY BACKTESTER ---
 with main_tab2:
@@ -872,7 +885,7 @@ with main_tab2:
     else:
         st.info("Select a date and click the button above to run backtesting.")
 
-# --- TAB 3: WEEKLY & SWING STRATEGY HUB ---
+# --- TAB 3: WEEKLY & SWING STRATEGY HUB (UNTOUCHED) ---
 with main_tab3:
     st.subheader("🗓️ Weekly & Swing Strategy Hub")
     st.markdown("Select your desired strategy from the dropdown below and execute a scan across your chosen Nifty universe size.")
