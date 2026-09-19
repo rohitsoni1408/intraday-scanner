@@ -57,10 +57,10 @@ if not st.session_state.authenticated:
     st.stop()
 
 # --- MAIN APP ---
-st.title("👑 NSE Ultimate Master Confluence Engine (Nifty 750 Universe)")
+st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
     "Trading Terminal featuring **Direct TradingView Chart Links**, **Frozen "
-    "Symbol Column**, **Intraday RSI Divergence**, **Exceptional Volume Filter**, and **Win Probability (%)** metrics across all strategies."
+    "Symbol Column**, **Intraday RSI Divergence**, **Win Probability (%)**, and customizable **Scan Universe Size**."
 )
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
@@ -300,7 +300,7 @@ def render_native_table(df, key_prefix):
 
 # --- INTRADAY ENGINE ---
 def process_ultimate_confluence(
-    stock_data, top_n_count, force_post_market=False
+    stock_data, top_n_count, universe_pool, force_post_market=False
 ):
     buy_list, sell_list = [], []
     extracted_symbols = [
@@ -309,7 +309,7 @@ def process_ultimate_confluence(
         if item.get("nsecode", item.get("symbol", ""))
     ]
     active_symbols = list(
-        dict.fromkeys(extracted_symbols + NIFTY_750_POOL[:40])
+        dict.fromkeys(extracted_symbols + universe_pool)
     )
 
     live_prices = fetch_live_market_data(active_symbols)
@@ -660,14 +660,14 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
 
 
 # --- BACKTEST ENGINE FOR INTRADAY ---
-def run_live_backtest(target_date, scan_clause, top_n_count):
+def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
     raw_stocks = fetch_chartink_stocks(scan_clause)
     extracted_symbols = [
         item.get("nsecode", item.get("symbol", "")).strip()
         for item in raw_stocks
         if item.get("nsecode", item.get("symbol", ""))
     ]
-    stock_list = list(dict.fromkeys(extracted_symbols + NIFTY_750_POOL[:20]))[
+    stock_list = list(dict.fromkeys(extracted_symbols + universe_pool))[
         : top_n_count * 2
     ]
     results = []
@@ -760,7 +760,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count):
 
 # --- CONTROLS ---
 st.subheader("⚙️ Master Engine Controls")
-col_info, col_slider = st.columns([2, 1])
+col_info, col_slider1, col_slider2 = st.columns([2, 1, 1])
 
 with col_info:
     market_status = (
@@ -768,15 +768,23 @@ with col_info:
         if is_market_closed()
         else "🟢 OPEN (Live Scanning Active)"
     )
-    st.info(f"Market Status: **{market_status}** | Universe: **Top Nifty 750 Stocks**")
-with col_slider:
+    st.info(f"Market Status: **{market_status}**")
+with col_slider1:
     selected_count = st.slider(
-        "Select Stock Output Count:",
+        "Output Stock Count:",
         min_value=3,
         max_value=25,
         value=10,
         step=1,
     )
+with col_slider2:
+    universe_limit = st.selectbox(
+        "Scan Universe Size (Top Nifty):",
+        options=[50, 100, 200, 500, 750],
+        index=2,  # Defaults to Top 200 for optimal speed
+    )
+
+active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
 st.markdown("---")
 
@@ -789,10 +797,10 @@ with main_tab1:
     )
 
     if st.button("🚀 Run Intraday Engine Scan", type="primary", use_container_width=True):
-        with st.spinner("Scanning Nifty 750 stocks for intraday setups..."):
+        with st.spinner(f"Scanning Top {universe_limit} Nifty stocks for intraday setups..."):
             raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
             df_b, df_s = process_ultimate_confluence(
-                raw_stocks, selected_count, force_post_market=post_market_toggle
+                raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
             )
             st.session_state["df_b_master"] = df_b
             st.session_state["df_s_master"] = df_s
@@ -800,7 +808,7 @@ with main_tab1:
 
     if "df_b_master" not in st.session_state:
         empty_b, empty_s = process_ultimate_confluence(
-            [], selected_count, force_post_market=post_market_toggle
+            [], selected_count, active_universe_pool, force_post_market=post_market_toggle
         )
         st.session_state["df_b_master"] = empty_b
         st.session_state["df_s_master"] = empty_s
@@ -833,8 +841,8 @@ with main_tab2:
     )
 
     if st.button("🚀 Run Intraday Backtest", type="primary"):
-        with st.spinner("Executing backtest over Nifty 750 intraday candles..."):
-            df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count)
+        with st.spinner(f"Executing backtest over Top {universe_limit} Nifty candles..."):
+            df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count, active_universe_pool)
             st.session_state["df_bt_results"] = df_bt
 
     if "df_bt_results" in st.session_state and not st.session_state["df_bt_results"].empty:
@@ -864,7 +872,7 @@ with main_tab2:
 # --- TAB 3: WEEKLY & SWING STRATEGY HUB ---
 with main_tab3:
     st.subheader("🗓️ Weekly & Swing Strategy Hub")
-    st.markdown("Select your desired strategy from the dropdown below and execute a scan across the Nifty 750 universe.")
+    st.markdown("Select your desired strategy from the dropdown below and execute a scan across your chosen Nifty universe size.")
 
     selected_strategy = st.selectbox(
         "Choose Weekly / Swing Strategy:",
@@ -876,13 +884,13 @@ with main_tab3:
     )
 
     if st.button("🚀 Run Selected Strategy Scan", type="primary", use_container_width=True):
-        with st.spinner(f"Executing scan for: {selected_strategy}..."):
+        with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_strategy}..."):
             if "Weekly Higher-Timeframe" in selected_strategy:
-                df_res = fetch_weekly_mtf_strategy(NIFTY_750_POOL, selected_count)
+                df_res = fetch_weekly_mtf_strategy(active_universe_pool, selected_count)
             elif "Daily Momentum" in selected_strategy:
-                df_res = fetch_daily_momentum_strategy(NIFTY_750_POOL, selected_count)
+                df_res = fetch_daily_momentum_strategy(active_universe_pool, selected_count)
             else:
-                df_res = fetch_elite_swing_strategy(NIFTY_750_POOL, selected_count)
+                df_res = fetch_elite_swing_strategy(active_universe_pool, selected_count)
 
             st.session_state["df_dropdown_strategy"] = df_res
             st.success("Scan completed successfully!")
