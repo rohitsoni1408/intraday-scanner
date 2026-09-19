@@ -13,7 +13,7 @@ def send_telegram_alert(message):
         print("Telegram token or chat ID missing.")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True}
     try:
         response = requests.post(url, json=payload)
         if response.status_code != 200:
@@ -31,10 +31,29 @@ def process_symbol(sym):
             
         cmp = round(float(df.iloc[-1]["Close"]), 2)
         prev_high = round(float(df.iloc[:-1]["High"].tail(10).max()), 2)
+        recent_low = round(float(df.iloc[:-1]["Low"].tail(5).min()), 2)
         
         # Intraday rolling high breakout check
         if cmp > prev_high:
-            msg = f"🚨 *RS1408_stock_bot Alert*\n\nSymbol: `{sym}`\nPrice: `₹{cmp}`\nTrigger: Crossed Rolling High!"
+            # Calculate Risk Management Levels
+            entry_price = cmp
+            stop_loss = recent_low if recent_low < entry_price else round(entry_price * 0.99, 2)
+            risk = entry_price - stop_loss
+            target = round(entry_price + (risk * 2), 2)  # 1:2 Risk-to-Reward ratio
+            
+            # Clean symbol name for TradingView link (e.g. RELIANCE.NS -> NSE:RELIANCE)
+            tv_symbol = sym.replace(".NS", "")
+            chart_url = f"https://www.tradingview.com/chart/?symbol=NSE:{tv_symbol}"
+            
+            msg = (
+                f"🚨 *RS1408 Intraday Breakout Alert*\n\n"
+                f"📌 *Stock:* `{sym}`\n"
+                f"💰 *Entry Price:* `₹{entry_price}`\n"
+                f"🛑 *Stop Loss (SL):* `₹{stop_loss}`\n"
+                f"🎯 *Target (1:2):* `₹{target}`\n\n"
+                f"📊 [View Live Chart]({chart_url})"
+            )
+            
             send_telegram_alert(msg)
             return sym
     except Exception as e:
@@ -42,7 +61,7 @@ def process_symbol(sym):
     return None
 
 def check_market():
-    # Comprehensive list of over 300+ major NSE stock symbols embedded directly
+    # 300+ major NSE stock symbols watchlist
     symbols = [
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "KOTAKBANK.NS", "LT.NS", "AXISBANK.NS",
         "HINDUNILVR.NS", "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS", "NTPC.NS", "ONGC.NS", "POWERGRID.NS", "TATASTEEL.NS",
@@ -82,7 +101,6 @@ def check_market():
     print(f"Starting parallel intraday scan for {len(symbols)} stocks...")
     
     alert_triggered = False
-    # Using 20 parallel workers to scan all 300+ stocks swiftly in the background
     with ThreadPoolExecutor(max_workers=20) as executor:
         futures = {executor.submit(process_symbol, sym): sym for sym in symbols}
         for future in as_completed(futures):
