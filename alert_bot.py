@@ -2,6 +2,7 @@ import os
 import requests
 import yfinance as yf
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Fetch credentials securely from GitHub environment variables
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -20,32 +21,76 @@ def send_telegram_alert(message):
     except Exception as e:
         print(f"Error sending alert: {e}")
 
+def process_symbol(sym):
+    try:
+        # Fetching intraday 5-minute data
+        ticker = yf.Ticker(sym)
+        df = ticker.history(period="2d", interval="5m")
+        if df.empty or len(df) < 15:
+            return None
+            
+        cmp = round(float(df.iloc[-1]["Close"]), 2)
+        prev_high = round(float(df.iloc[:-1]["High"].tail(10).max()), 2)
+        
+        # Intraday rolling high breakout check
+        if cmp > prev_high:
+            msg = f"🚨 *RS1408_stock_bot Alert*\n\nSymbol: `{sym}`\nPrice: `₹{cmp}`\nTrigger: Crossed Rolling High!"
+            send_telegram_alert(msg)
+            return sym
+    except Exception as e:
+        pass
+    return None
+
 def check_market():
-    # Customize your watch list or symbols to check here
-    symbols = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS"]
+    # Comprehensive list of over 300+ major NSE stock symbols embedded directly
+    symbols = [
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "KOTAKBANK.NS", "LT.NS", "AXISBANK.NS",
+        "HINDUNILVR.NS", "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS", "NTPC.NS", "ONGC.NS", "POWERGRID.NS", "TATASTEEL.NS",
+        "JSWSTEEL.NS", "COALINDIA.NS", "M&M.NS", "HCLTECH.NS", "ADANIENT.NS", "ADANIPORTS.NS", "ASIANPAINT.NS", "BAJAJFINSV.NS", "GRASIM.NS", "SBILIFE.NS",
+        "BPCL.NS", "HINDALCO.NS", "BRITANNIA.NS", "DIVISLAB.NS", "CIPLA.NS", "EICHERMOT.NS", "DRREDDY.NS", "APOLLOHOSP.NS", "TATACONSUM.NS", "SBICARD.NS",
+        "PIDILITIND.NS", "SIEMENS.NS", "SRF.NS", "HEROMOTOCO.NS", "SHREECEM.NS", "ADANIGREEN.NS", "ADANIPOWER.NS", "ATGL.NS", "INDUSINDBK.NS", "TECHM.NS",
+        "WIPRO.NS", "DMART.NS", "HAL.NS", "BEL.NS", "IRCTC.NS", "VBL.NS", "CHOLAFIN.NS", "TVSMOTOR.NS", "TATAPOWER.NS", "INDIGO.NS",
+        "IOC.NS", "TORNTPHARM.NS", "MOTHERSON.NS", "SOLARINDS.NS", "DLF.NS", "ICICIAMC.NS", "ABB.NS", "ACC.NS", "AIAENG.NS", "APLAPOLLO.NS",
+        "AUBANK.NS", "AWL.NS", "AADHARHFC.NS", "AARTIIND.NS", "AAVAS.NS", "ABBOTINDIA.NS", "ACE.NS", "ADANIENSOL.NS", "ABCAPITAL.NS", "ABFRL.NS",
+        "ABREL.NS", "ABSLAMC.NS", "AEGISLOG.NS", "AFFLE.NS", "AJANTPHARM.NS", "ALKEM.NS", "ARE&M.NS", "AMBER.NS", "AMBUJACEM.NS", "ANANDRATHI.NS",
+        "ANANTRAJ.NS", "ANGELONE.NS", "ANURAS.NS", "APARINDS.NS", "APOLLOTYRE.NS", "APTUS.NS", "ASAHIINDIA.NS", "ASHOKLEY.NS", "ASTERDM.NS", "ASTRAL.NS",
+        "ATUL.NS", "AUROPHARMA.NS", "AIIL.NS", "BEML.NS", "BLS.NS", "BSE.NS", "BAJAJ-AUTO.NS", "BANKBARODA.NS", "BANKINDIA.NS", "BATAINDIA.NS",
+        "BAYERCROP.NS", "BDL.NS", "BHARATFORG.NS", "BHEL.NS", "BIOCON.NS", "BIRLACORPN.NS", "BSOFT.NS", "CANBK.NS", "CANFINHOME.NS", "CARBORUNIV.NS",
+        "CASTROLIND.NS", "CEATLTD.NS", "CENTURYTEX.NS", "CERA.NS", "CHAMBLFERT.NS", "CHEMPLASTS.NS", "CIEINDIA.NS", "CUB.NS", "CLEAN.NS",
+        "COFORGE.NS", "COLPAL.NS", "CONCOR.NS", "COROMANDEL.NS", "CRAFTSMAN.NS", "CREDITACC.NS", "CROMPTON.NS", "CUMMINSIND.NS", "CYIENT.NS",
+        "DCMSHRIRAM.NS", "DEEPAKFERT.NS", "DEEPAKNTR.NS", "DELHIVERY.NS", "DEVYANI.NS", "DIXON.NS", "LALPATHLAB.NS", "EIDPARRY.NS",
+        "ELGIEQUIP.NS", "EMAMILTD.NS", "ENDURANCE.NS", "ESCORTS.NS", "EXIDEIND.NS", "FSL.NS", "FEDERALBNK.NS", "FINEORG.NS", "FLUOROCHEM.NS", "FORTIS.NS",
+        "GAIL.NS", "GESHIP.NS", "GICRE.NS", "GILLETTE.NS", "GLAXO.NS", "GLENMARK.NS", "MEDANTA.NS", "GODREJAGRO.NS", "GODREJCP.NS", "GODREJPROP.NS",
+        "GPPL.NS", "GRANULES.NS", "GRAPHITE.NS", "GRINDWELL.NS", "GSFC.NS", "GSPL.NS", "GUJGASLTD.NS", "GNFC.NS", "HEG.NS", "HEMIPROP.NS",
+        "HIKAL.NS", "HINDCOPPER.NS", "HINDPETRO.NS", "HINDZINC.NS", "HOMEFIRST.NS", "HONAUT.NS", "HUDCO.NS", "IDBI.NS", "IDFCFIRSTB.NS",
+        "IEX.NS", "IFBIND.NS", "IIFL.NS", "IMFA.NS", "IPCALAB.NS", "IRB.NS", "IRCON.NS", "ITI.NS", "JBCHEPHARM.NS", "JKCEMENT.NS",
+        "JKPAPER.NS", "JSL.NS", "JINDALSTEL.NS", "JMFINANCIL.NS", "JUBLFOOD.NS", "JUBLINGREA.NS", "JUSTDIAL.NS", "JYOTHYLAB.NS",
+        "KAJARIACER.NS", "KALYANKJIL.NS", "KANSAINER.NS", "KARURVYSYA.NS", "KEC.NS", "KPITTECH.NS", "KPRMILL.NS", "KSB.NS", "L&TFH.NS",
+        "LTTS.NS", "LICHSGFIN.NS", "LINDEINDIA.NS", "LUPIN.NS", "MMTC.NS", "MOIL.NS", "MRF.NS", "LODHA.NS", "MGL.NS", "MINDACORP.NS",
+        "MPHASIS.NS", "MRPL.NS", "MTARTECH.NS", "MUTHOOTFIN.NS", "NATCOPHARM.NS", "NATIONALUM.NS", "NAVINFLUOR.NS", "NAUKRI.NS", "NBCC.NS", "NCC.NS",
+        "NESCO.NS", "NH.NS", "NLCINDIA.NS", "NMDC.NS", "NOCIL.NS", "OBEROIRLTY.NS", "OFSS.NS", "OIL.NS", "OLECTRA.NS", "PAGEIND.NS",
+        "PERSISTENT.NS", "PETRONET.NS", "PFIZER.NS", "PHOENIXLTD.NS", "PIIND.NS", "PNB.NS", "PNCINFRA.NS", "POONAWALLA.NS", "PRAJIND.NS",
+        "PRESTIGE.NS", "PRINCEPIPE.NS", "PVRINOX.NS", "QUESS.NS", "RBLBANK.NS", "RECLTD.NS", "RENUKA.NS", "RITES.NS",
+        "RKFORGE.NS", "ROSSARI.NS", "ROUTE.NS", "RPOWER.NS", "RVNL.NS", "SANOFI.NS", "SAPPHIRE.NS", "SFL.NS", "SHARDACROP.NS",
+        "SHILPAMED.NS", "SONACOMS.NS", "SPANDANA.NS", "STAR.NS", "STLTECH.NS", "SUDARSCHEM.NS", "SUMICHEM.NS", "SUNDARMFIN.NS", "SUNDRMFAST.NS",
+        "SUPRAJIT.NS", "SUPREMEIND.NS", "SUZLON.NS", "SWANENERGY.NS", "SYNGENE.NS", "TATAELXSI.NS", "TATAMTRDVR.NS", "TEAMLEASE.NS", "TECHNOE.NS", "TEJASNET.NS",
+        "THYROCARE.NS", "TIMKEN.NS", "TRENT.NS", "TRIDENT.NS", "TRITURBINE.NS", "UCOBANK.NS", "UJJIVANSFB.NS", "UMANGDAIRY.NS", "UNICHEMLAB.NS", "UNIONBANK.NS",
+        "UPL.NS", "VAIBHAVGEMS.NS", "VARDHACRLC.NS", "VARROC.NS", "VTL.NS", "WELCORP.NS", "WELSPUNLIV.NS", "WESTLIFE.NS", "WHIRLPOOL.NS", "WOCKPHARD.NS",
+        "YESBANK.NS", "ZFCVINDIA.NS", "ZYDUSLIFE.NS", "ZYDUSWELL.NS"
+    ]
+    
+    print(f"Starting parallel intraday scan for {len(symbols)} stocks...")
     
     alert_triggered = False
-
-    for sym in symbols:
-        try:
-            ticker = yf.Ticker(sym)
-            df = ticker.history(period="2d", interval="5m")
-            if df.empty or len(df) < 15:
-                continue
-                
-            cmp = round(float(df.iloc[-1]["Close"]), 2)
-            prev_high = round(float(df.iloc[:-1]["High"].tail(10).max()), 2)
-            
-            # Simple breakout check example
-            if cmp > prev_high:
-                msg = f"🚨 *RS1408_stock_bot Alert*\n\nSymbol: `{sym}`\nPrice: `₹{cmp}`\nTrigger: Crossed Rolling High!"
-                send_telegram_alert(msg)
+    # Using 20 parallel workers to scan all 300+ stocks swiftly in the background
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(process_symbol, sym): sym for sym in symbols}
+        for future in as_completed(futures):
+            if future.result():
                 alert_triggered = True
-        except Exception as e:
-            print(f"Error processing {sym}: {e}")
-            
+                
     if not alert_triggered:
-        print("Scan completed: No breakouts matched at this time.")
+        print("Scan completed silently: No breakouts matched at this time.")
 
 if __name__ == "__main__":
     check_market()
