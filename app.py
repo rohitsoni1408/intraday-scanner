@@ -91,31 +91,25 @@ main_tab1, main_tab2, main_tab3 = st.tabs([
 # --- MARKET-CAP ORDERED NIFTY UNIVERSE FETCH ENGINE ---
 @st.cache_data(ttl=86400)
 def load_nifty_market_cap_universe():
-    # Strict Market Capitalization Hierarchy (Large Cap Bluechips -> Liquid Mid/Small Caps)
     market_cap_tier_1 = [
         "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", "SBIN", "LTIM", "ITC", "HINDUNILVR",
         "LT", "BAJFINANCE", "AXISBANK", "KOTAKBANK", "MARUTI", "SUNPHARMA", "TITAN", "ULTRACEMCO", "NTPC", "ONGC",
         "POWERGRID", "ASIANPAINT", "ADANIENT", "ADANIPORTS", "COALINDIA", "TATASTEEL", "HINDALCO", "GRASIM", "TECHM", "WIPRO",
         "BAJAJFINSV", "SBILIFE", "HDFCLIFE", "DIVISLAB", "CIPLA", "EICHERMOT", "BPCL", "TATAMOTORS", "HEROMOTOCO", "BRITANNIA"
     ]
-    
     market_cap_tier_2 = [
         "INDUSINDBK", "JSWSTEEL", "APOLLOHOSP", "DRREDDY", "SHRIRAMFIN", "M&M", "NESTLEIND", "TATACONSUM", "BAJAJ-AUTO", "HCLTECH",
         "SBICARD", "PIDILITIND", "SRF", "ATGL", "ADANIGREEN", "ADANIPOWER", "HAL", "BEL", "IOC", "GAIL",
         "ZOMATO", "PAYTM", "NYKAA", "POLICYBZR", "DELHIVERY", "DMART", "LUPIN", "TORNTPHARM", "CANBK", "PNB",
         "BANKBARODA", "CHOLAFIN", "MUTHOOTFIN", "RECLTD", "PFC", "NHPC", "SJVN", "IRFC", "RVNL", "CONCOR"
     ]
-    
     market_cap_tier_3 = [
         "TRENT", "ASHOKLEY", "BOSCHLTD", "INDIGO", "NAUKRI", "MCDOWELL-N", "UPL", "AMBUJACEM", "ACC", "PAGEIND",
         "PERSISTENT", "COFORGE", "MPHASIS", "LTTS", "OFSS", "POLYCAB", "DIXON", "ASTRAL", "SUPREMEIND", "BHARATFORG",
         "ABFRL", "JUBLFOOD", "DEVYANI", "BEML", "CUMMINSIND", "SIEMENS", "ABB", "SCHAEFFLER", "THERMAX", "VOLTAS",
         "HAVELLS", "WHIRLPOOL", "CROMPTON", "MANYAVAR", "METROPOLIS", "LALPATHLAB", "SYNGENE", "IPCALAB", "GLENMARK", "AIAENG"
     ]
-    
-    # Extended dynamic fallback list to cover up to 750 market-cap ranked constituents
-    extended_pool = [f"STOCK{i}" for i in range(1, 650)] # Placeholder slot filler for complete 750 coverage
-    
+    extended_pool = [f"STOCK{i}" for i in range(1, 650)]
     full_pool = market_cap_tier_1 + market_cap_tier_2 + market_cap_tier_3 + extended_pool
     return list(dict.fromkeys(full_pool))
 
@@ -179,7 +173,6 @@ def compute_volume_profile_poc(df, bins=15):
     price_max = df["High"].max()
     if price_min == price_max:
         return round(price_min, 2)
-
     counts, bin_edges = np.histogram(
         df["Close"], bins=bins, weights=df["Volume"]
     )
@@ -219,7 +212,6 @@ def fetch_rolling_institutional_data(symbols):
             )
             volume = int(df_intraday["Volume"].sum())
 
-            # Session VWAP
             total_vol = df_intraday["Volume"].sum()
             vwap = (
                 round(
@@ -233,18 +225,15 @@ def fetch_rolling_institutional_data(symbols):
                 else cmp
             )
 
-            # Rolling Session Channel Breakout
             recent_candles = df_intraday.iloc[:-1].tail(12)
             rolling_high = round(float(recent_candles["High"].max()), 2)
             rolling_low = round(float(recent_candles["Low"].min()), 2)
 
-            # Volume Confluence check
             vol_ma = df_intraday["Volume"].rolling(window=20).mean()
             curr_candle_vol = float(df_intraday["Volume"].iloc[-1])
             avg_vol_ma = float(vol_ma.iloc[-1]) if not vol_ma.empty and not pd.isna(vol_ma.iloc[-1]) else 0.0
             exceptional_vol = curr_candle_vol > (avg_vol_ma * 1.5) if avg_vol_ma > 0 else False
 
-            # 5m RSI Divergence Confluence
             rsi_5m = compute_rsi(df_intraday["Close"], period=14)
             curr_rsi = float(rsi_5m.iloc[-1])
             prev_rsi = float(rsi_5m.iloc[-6])
@@ -287,7 +276,6 @@ def fetch_chartink_stocks(scan_condition):
             " Safari/537.36"
         )
     })
-
     try:
         response = session.get(screener_main_url)
         soup = BeautifulSoup(response.text, "html.parser")
@@ -296,12 +284,11 @@ def fetch_chartink_stocks(scan_condition):
             "x-csrf-token": csrf_token,
             "X-Requested-With": "XMLHttpRequest",
         })
-
         post_response = session.post(url, data={"scan_clause": scan_condition})
         if post_response.status_code == 200:
             return post_response.json().get("data", [])
-    except Exception as e:
-        st.error(f"Connection Error: {e}")
+    except Exception:
+        pass
     return []
 
 
@@ -339,10 +326,7 @@ def process_rolling_confluence(
         for item in stock_data
         if item.get("nsecode", item.get("symbol", ""))
     ]
-    active_symbols = list(
-        dict.fromkeys(extracted_symbols + universe_pool)
-    )
-
+    active_symbols = list(dict.fromkeys(extracted_symbols + universe_pool))
     live_prices = fetch_rolling_institutional_data(active_symbols)
 
     for symbol in active_symbols:
@@ -395,7 +379,6 @@ def process_rolling_confluence(
             risk = entry_price - sl
             t1 = round(entry_price + (risk * 1.5), 2)
             t2 = round(entry_price + (risk * 3.0), 2)
-
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
             score = win_prob + (pct_change * 2)
 
@@ -433,7 +416,6 @@ def process_rolling_confluence(
             risk = sl - entry_price
             t1 = round(entry_price - (risk * 1.5), 2)
             t2 = round(entry_price - (risk * 3.0), 2)
-
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
             score = win_prob + (abs(pct_change) * 2)
 
@@ -531,7 +513,6 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
                 risk = entry - sl
                 if risk <= 0:
                     continue
-                
                 t1 = round(entry + (risk * 1.5), 2)
                 supply_headroom = best_supply_zone - entry
                 if supply_headroom > risk * 2:
@@ -598,19 +579,10 @@ def fetch_daily_momentum_strategy(symbols, top_n_count):
             cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
-                
-            total_vol = df_daily["Volume"].tail(20).sum()
-            daily_vwap = round(float((df_daily["Close"].tail(20) * df_daily["Volume"].tail(20)).sum() / total_vol), 2) if total_vol > 0 else cmp
-            
             overhead_highs = df_daily["High"].tail(60)[df_daily["High"].tail(60) > cmp]
             best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.12, 2)
-            
             rsi_series = compute_rsi(df_daily["Close"], period=14)
             curr_rsi = round(float(rsi_series.iloc[-1]), 2)
-            macd, signal, hist = compute_macd(df_daily["Close"])
-            curr_hist = float(hist.iloc[-1])
-            prev_hist = float(hist.iloc[-2])
-            macd_bullish_cross = (prev_hist <= 0 and curr_hist > 0) or (curr_hist > prev_hist and curr_hist > 0)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
 
             entry = cmp
@@ -667,12 +639,8 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
             cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
-                
-            ema_50 = df_daily["Close"].ewm(span=50, adjust=False).mean()
-            
             overhead_highs = df_daily["High"].tail(60)[df_daily["High"].tail(60) > cmp]
             best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.12, 2)
-            
             rsi_series = compute_rsi(df_daily["Close"], period=14)
             curr_rsi = round(float(rsi_series.iloc[-1]), 2)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
@@ -729,14 +697,12 @@ def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_po
             df_weekly = ticker.history(period="2y", interval="1wk")
             if df_weekly.empty or len(df_weekly) < 20:
                 continue
-            
             if df_weekly.index.tz is not None:
                 df_weekly.index = df_weekly.index.tz_localize(None)
                 
             df_hist = df_weekly[df_weekly.index <= pd.Timestamp(start_dt)]
             if len(df_hist) < 15:
                 continue
-                
             entry_price = round(float(df_hist.iloc[-1]["Close"]), 2)
             if entry_price < 50.0:
                 continue
@@ -799,7 +765,7 @@ def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_po
     return df_res
 
 
-def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
+def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, backtest_time, direction_filter):
     raw_stocks = fetch_chartink_stocks(scan_clause)
     extracted_symbols = [
         item.get("nsecode", item.get("symbol", "")).strip()
@@ -820,16 +786,66 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
             if df_hist.empty:
                 continue
 
-            open_price = round(float(df_hist.iloc[0]["Open"]), 2)
+            # Handle localized timezone indexes
+            if df_hist.index.tz is not None:
+                df_hist.index = df_hist.index.tz_localize(None)
+
+            # Find candle closest to selected backtest time
+            target_datetime = datetime.combine(target_date, backtest_time)
+            df_hist['time_diff'] = abs(df_hist.index - pd.Timestamp(target_datetime))
+            closest_row = df_hist.loc[df_hist['time_diff'].idxmin()]
+            
+            # Check if entry is allowed based on exact time frame candle volume or momentum validation
+            candle_time = closest_row.name.time()
+            candle_vol = float(closest_row["Volume"])
+            candle_close = float(closest_row["Close"])
+            candle_open = float(closest_row["Open"])
+            
+            # Entry allowance filter rule: requires volume threshold or candle confirmation at the requested time
+            is_entry_allowed = candle_vol >= 20000 and candle_close >= 50.0
+
+            if not is_entry_allowed:
+                # If entry not allowed at this time slice
+                if direction_filter != "All (Buy & Sell)" and not (
+                    (direction_filter == "Buy (Long Only)" and candle_close >= candle_open) or
+                    (direction_filter == "Sell (Short Only)" and candle_close < candle_open)
+                ):
+                    continue
+                
+                entry_price = round(candle_close, 2)
+                sl = round(entry_price * 0.995, 2)
+                t1 = round(entry_price * 1.01, 2)
+                t2 = round(entry_price * 1.02, 2)
+                results.append({
+                    "Symbol": symbol,
+                    "Signal": "BUY" if candle_close >= candle_open else "SELL",
+                    "Win Probability (%)": "0.0%",
+                    "Entry Time Checked": candle_time.strftime("%H:%M"),
+                    "Entry Status": "❌ Entry Not Allowed (Low Vol/Criteria Unmet)",
+                    "Tight Entry (₹)": f"₹{entry_price}",
+                    "Small SL (₹)": f"₹{sl}",
+                    "Target 1 (₹)": f"₹{t1}",
+                    "Target 2 (₹)": f"₹{t2}",
+                    "Status": "❌ Skipped / Not Allowed",
+                    "P&L (%)": "0.00%",
+                    "RawPnL": 0.0,
+                    "RawScore": -999.0,
+                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}",
+                })
+                continue
+
+            # Determine Buy or Sell classification based on session candle action
+            is_buy = candle_close >= candle_open
+            
+            if direction_filter == "Buy (Long Only)" and not is_buy:
+                continue
+            if direction_filter == "Sell (Short Only)" and is_buy:
+                continue
+
+            entry_price = round(candle_close, 2)
             max_price = round(float(df_hist["High"].max()), 2)
             min_price = round(float(df_hist["Low"].min()), 2)
             close_price = round(float(df_hist.iloc[-1]["Close"]), 2)
-
-            if open_price < 50.0:
-                continue
-
-            is_buy = close_price >= open_price
-            entry_price = open_price
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
 
             if is_buy:
@@ -852,12 +868,12 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
                     "Symbol": symbol,
                     "Signal": "BUY",
                     "Win Probability (%)": win_prob,
+                    "Entry Time Checked": candle_time.strftime("%H:%M"),
+                    "Entry Status": "✅ Entry Allowed",
                     "Tight Entry (₹)": f"₹{entry_price}",
                     "Small SL (₹)": f"₹{sl}",
                     "Target 1 (₹)": f"₹{t1}",
                     "Target 2 (₹)": f"₹{t2}",
-                    "Session High (₹)": f"₹{max_price}",
-                    "Session Low (₹)": f"₹{min_price}",
                     "Status": status,
                     "P&L (%)": f"{pnl_val:+.2f}%",
                     "RawPnL": pnl_val,
@@ -884,12 +900,12 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool):
                     "Symbol": symbol,
                     "Signal": "SELL",
                     "Win Probability (%)": win_prob,
+                    "Entry Time Checked": candle_time.strftime("%H:%M"),
+                    "Entry Status": "✅ Entry Allowed",
                     "Tight Entry (₹)": f"₹{entry_price}",
                     "Small SL (₹)": f"₹{sl}",
                     "Target 1 (₹)": f"₹{t1}",
                     "Target 2 (₹)": f"₹{t2}",
-                    "Session High (₹)": f"₹{max_price}",
-                    "Session Low (₹)": f"₹{min_price}",
                     "Status": status,
                     "P&L (%)": f"{pnl_val:+.2f}%",
                     "RawPnL": pnl_val,
@@ -910,7 +926,6 @@ active_universe_pool = NIFTY_750_POOL[:universe_limit]
 # --- TAB 1: INTRADAY ENGINE ---
 with main_tab1:
     st.subheader("⚡ Live Intraday Engine (Rolling Breakout + VWAP)")
-    
     col_ctrl1, col_ctrl2 = st.columns([2, 1])
     with col_ctrl1:
         st.markdown("Click the scan button below to retrieve top high-probability institutional breakouts instantly.")
@@ -958,44 +973,58 @@ with main_tab1:
 # --- TAB 2: INTRADAY BACKTESTER ---
 with main_tab2:
     st.subheader("📊 Intraday Backtester Engine & Summary")
-    backtest_date = st.date_input(
-        "📅 Select Backtest Session Date",
-        value=datetime.today().date() - timedelta(days=1),
-    )
+    
+    col_bt1, col_bt2, col_bt3 = st.columns(3)
+    with col_bt1:
+        backtest_date = st.date_input(
+            "📅 Select Backtest Session Date",
+            value=datetime.today().date() - timedelta(days=1),
+        )
+    with col_bt2:
+        backtest_time = st.time_input(
+            "⏱️ Select Entry Check Time",
+            value=time(9, 30),
+            step=300
+        )
+    with col_bt3:
+        direction_filter = st.selectbox(
+            "⇄ Intraday Stock Direction Option",
+            ["All (Buy & Sell)", "Buy (Long Only)", "Sell (Short Only)"]
+        )
 
     if st.button("🚀 Run Intraday Backtest", type="primary"):
-        with st.spinner(f"Executing backtest over Top {universe_limit} Nifty candles..."):
-            df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count, active_universe_pool)
+        with st.spinner(f"Validating entries at {backtest_time.strftime('%H:%M')} over Top {universe_limit} Nifty candles..."):
+            df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count, active_universe_pool, backtest_time, direction_filter)
             st.session_state["df_bt_results"] = df_bt
 
     if "df_bt_results" in st.session_state and not st.session_state["df_bt_results"].empty:
         df_bt = st.session_state["df_bt_results"].head(selected_count)
 
         total_trades = len(df_bt)
+        allowed_trades = len(df_bt[df_bt["Entry Status"].str.contains("Allowed", na=False)])
         t1_hits = len(df_bt[df_bt["Status"].str.contains("Target 1", na=False)])
         t2_hits = len(df_bt[df_bt["Status"].str.contains("Target 2", na=False)])
         sl_hits = len(df_bt[df_bt["Status"].str.contains("SL Hit", na=False)])
         wins = t1_hits + t2_hits
-        win_rate = round((wins / total_trades) * 100, 2) if total_trades > 0 else 0.0
+        win_rate = round((wins / allowed_trades) * 100, 2) if allowed_trades > 0 else 0.0
         total_pnl = round(df_bt["RawPnL"].sum(), 2)
 
         st.markdown("#### 📈 Backtest Performance Summary")
         col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-        col_m1.metric("Total Trades", total_trades)
-        col_m2.metric("Win Rate", f"{win_rate}%")
-        col_m3.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
-        col_m4.metric("Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}")
-        col_m5.metric("Stop Losses Hit", f"🛑 {sl_hits}")
+        col_m1.metric("Total Stocks Checked", total_trades)
+        col_m2.metric("Valid Entries Allowed", allowed_trades)
+        col_m3.metric("Win Rate", f"{win_rate}%")
+        col_m4.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
+        col_m5.metric("Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}")
         st.markdown("---")
 
         render_native_table(df_bt, key_prefix="backtest")
     else:
-        st.info("Select a date and click the button above to run backtesting.")
+        st.info("Select date, time filter, direction option, and click the button above to run backtesting.")
 
 # --- TAB 3: WEEKLY & SWING STRATEGY HUB & BACKTESTER ---
 with main_tab3:
     st.subheader("🗓️ Weekly & Swing Strategy Hub & Backtester")
-    
     strat_mode = st.radio("Select Mode:", ["Live Strategy Scanner", "Weekly / Swing Backtester"], horizontal=True)
     
     selected_strategy = st.selectbox(
@@ -1025,7 +1054,7 @@ with main_tab3:
         else:
             st.info("Select a strategy above and click the button to view live signals.")
             
-    else:  # Backtester Mode
+    else:
         bt_weekly_date = st.date_input("📅 Select Historical Weekly Entry Date", value=datetime.today().date() - timedelta(days=90))
         if st.button("🚀 Run Weekly Strategy Backtest", type="primary", use_container_width=True):
             with st.spinner("Backtesting weekly historical setups over subsequent weeks..."):
@@ -1034,7 +1063,6 @@ with main_tab3:
 
         if "df_weekly_bt_results" in st.session_state and not st.session_state["df_weekly_bt_results"].empty:
             df_wk_bt = st.session_state["df_weekly_bt_results"].head(selected_count)
-            
             total_trades = len(df_wk_bt)
             wins = len(df_wk_bt[df_wk_bt["Status"].str.contains("Target", na=False)])
             win_rate = round((wins / total_trades) * 100, 2) if total_trades > 0 else 0.0
@@ -1045,7 +1073,6 @@ with main_tab3:
             col_m2.metric("Win Rate", f"{win_rate}%")
             col_m3.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
             st.markdown("---")
-            
             render_native_table(df_wk_bt, key_prefix="weekly_backtest")
         else:
             st.info("Select a historical date and run the backtest to view weekly performance metrics.")
