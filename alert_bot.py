@@ -68,51 +68,68 @@ def process_symbol(sym):
     if df.empty or len(df) < 15:
       return None
 
-    # Real-time calculation from live market candles
-    cmp = round(float(df.iloc[-1]["Close"]), 2)
-    prev_high = round(float(df.iloc[:-1]["High"].tail(10).max()), 2)
-    recent_low = round(float(df.iloc[:-1]["Low"].tail(5).min()), 2)
+    # Check the last 3 candles (-3, -2, -1) to cover a full 15-minute window
+    # even if the cron job runs every 15 minutes.
+    for index_offset in [-3, -2, -1]:
+      candle = df.iloc[index_offset]
 
-    # Intraday rolling high breakout check
-    if cmp > prev_high:
-      # Check if alert was already sent today for this symbol
-      sent_symbols = load_sent_alerts()
-      if sym in sent_symbols:
-        return None
+      # Slice historical data up to that specific candle's position
+      historical_df = df.iloc[: len(df) + index_offset]
+      if len(historical_df) < 10:
+        continue
 
-      # Dynamic Risk Management Levels based on live price action
-      entry_price = cmp
-      stop_loss = (
-          recent_low
-          if recent_low < entry_price
-          else round(entry_price * 0.99, 2)
-      )
-      risk = entry_price - stop_loss
-      target = round(entry_price + (risk * 2), 2)  # 1:2 Risk-to-Reward ratio
+      cmp = round(float(candle["Close"]), 2)
+      prev_high = round(float(historical_df["High"].tail(10).max()), 2)
+      recent_low = round(float(historical_df["Low"].tail(5).min()), 2)
 
-      # Clean symbol name for TradingView link (e.g., RELIANCE.NS -> NSE:RELIANCE)
-      tv_symbol = sym.replace(".NS", "")
-      chart_url = f"https://www.tradingview.com/chart/?symbol=NSE:{tv_symbol}"
+      # Institutional Volume Filter Calculation
+      current_vol = float(candle["Volume"])
+      avg_vol = float(historical_df["Volume"].tail(10).mean())
 
-      msg = (
-          f"🚨 *RS1408 Intraday Breakout Alert*\n\n"
-          f"📌 *Stock:* `{sym}`\n"
-          f"💰 *Entry Price:* `₹{entry_price}`\n"
-          f"🛑 *Stop Loss (SL):* `₹{stop_loss}`\n"
-          f"🎯 *Target (1:2):* `₹{target}`\n\n"
-          f"📊 [View Live Chart]({chart_url})"
-      )
+      # Condition: Price breakout AND volume is at least 2x the 10-period average volume
+      is_volume_surge = avg_vol > 0 and (current_vol >= (2.0 * avg_vol))
 
-      send_telegram_alert(msg)
-      save_sent_alert(sym)
-      return sym
+      if cmp > prev_high and is_volume_surge:
+        # Check if alert was already sent today for this symbol
+        sent_symbols = load_sent_alerts()
+        if sym in sent_symbols:
+          return None
+
+        # Dynamic Risk Management Levels based on live price action
+        entry_price = cmp
+        stop_loss = (
+            recent_low
+            if recent_low < entry_price
+            else round(entry_price * 0.99, 2)
+        )
+        risk = entry_price - stop_loss
+        target = round(entry_price + (risk * 2), 2)  # 1:2 Risk-to-Reward ratio
+        vol_multiplier = round(current_vol / avg_vol, 1)
+
+        # Clean symbol name for TradingView link (e.g., RELIANCE.NS -> NSE:RELIANCE)
+        tv_symbol = sym.replace(".NS", "")
+        chart_url = f"https://www.tradingview.com/chart/?symbol=NSE:{tv_symbol}"
+
+        msg = (
+            f"🚨 *RS1408 Institutional Breakout Alert*\n\n"
+            f"📌 *Stock:* `{sym}`\n"
+            f"💰 *Entry Price:* `₹{entry_price}`\n"
+            f"🛑 *Stop Loss (SL):* `₹{stop_loss}`\n"
+            f"🎯 *Target (1:2):* `₹{target}`\n"
+            f"📦 *Volume Surge:* `{vol_multiplier}x` average\n\n"
+            f"📊 [View Live Chart]({chart_url})"
+        )
+
+        send_telegram_alert(msg)
+        save_sent_alert(sym)
+        return sym
   except Exception as e:
     pass
   return None
 
 
 def check_market():
-  # Comprehensive watchlist of 500 top NSE stock symbols embedded directly
+  # Comprehensive watchlist of NSE stock symbols embedded directly
   symbols = [
       "RELIANCE.NS",
       "TCS.NS",
@@ -425,10 +442,8 @@ def check_market():
       "ZFCVINDIA.NS",
       "ZYDUSLIFE.NS",
       "ZYDUSWELL.NS",
-      # Additional top NSE symbols to complete the 500 universe coverage
       "AARTIPHARM.NS",
       "ABSL.NS",
-      "ADANIENT.NS",
       "AGI.NS",
       "AKZOINDIA.NS",
       "ALEMBICLTD.NS",
@@ -463,11 +478,8 @@ def check_market():
       "CCL.NS",
       "CENTENK.NS",
       "CENTRALBK.NS",
-      "CHALO.NS",
       "CHEMCON.NS",
-      "CHITRA.NS",
       "CIGNITITEC.NS",
-      "CLARIS.NS",
       "COSMOFILMS.NS",
       "CREDITACCESS.NS",
       "CSBBANK.NS",
@@ -476,12 +488,9 @@ def check_market():
       "DCW.NS",
       "DELTACORP.NS",
       "DHANI.NS",
-      "DHRUV.NS",
       "DIAMONDYD.NS",
       "DODLA.NS",
       "DREAMFOLKS.NS",
-      "DUMMY1.NS",
-      "DUMMY2.NS",
       "EASEMYTRIP.NS",
       "EDELWEISS.NS",
       "EIHAHOTELS.NS",
@@ -497,7 +506,6 @@ def check_market():
       "FIVESTAR.NS",
       "FLAIR.NS",
       "GENESYS.NS",
-      "GESHIP.NS",
       "GFLLIMITED.NS",
       "GICHSGFIN.NS",
       "GKWLIMITED.NS",
@@ -505,7 +513,6 @@ def check_market():
       "GLS.NS",
       "GMDC.NS",
       "GMRINFRA.NS",
-      "GNAL.NS",
       "GOCOLORS.NS",
       "GODREJIND.NS",
       "GOKEX.NS",
@@ -518,7 +525,6 @@ def check_market():
       "GTPL.NS",
       "GUJALKALI.NS",
       "GULFOILLUB.NS",
-      "GVKPIL.NS",
       "HAPPSTMNDS.NS",
       "HATHWAY.NS",
       "HCG.NS",
@@ -533,7 +539,6 @@ def check_market():
       "ICIL.NS",
       "ICRA.NS",
       "IDFC.NS",
-      "IFG.NS",
       "IGL.NS",
       "IIFLSEC.NS",
       "INDOCO.NS",
@@ -544,10 +549,8 @@ def check_market():
       "INSECTICID.NS",
       "INTELLECT.NS",
       "IOB.NS",
-      "IPSL.NS",
       "ISGEC.NS",
       "ITDC.NS",
-      "ITI.NS",
       "JAGRAN.NS",
       "JAIBALAJI.NS",
       "JAMNAAUTO.NS",
@@ -557,10 +560,8 @@ def check_market():
       "JINDALSAW.NS",
       "JISLJALEQS.NS",
       "JKIL.NS",
-      "JMCPROJECT.NS",
       "JTEKTINDIA.NS",
       "KABRAEXTRU.NS",
-      "KAJAL.NS",
       "KALPATPOWR.NS",
       "KALYANI.NS",
       "KAMDHENU.NS",
@@ -574,27 +575,21 @@ def check_market():
       "KNRCON.NS",
       "KOLTEPATIL.NS",
       "KOPRAN.NS",
-      "Kothari.NS",
       "KSE.NS",
       "KUANTUM.NS",
-      "LAKSHVILAS.NS",
       "LASA.NS",
       "LAURUSLABS.NS",
-      " Laxmi.NS",
       "LEMONTREE.NS",
       "LGBBROSLTD.NS",
-      "Likis.NS",
       "LOVABLE.NS",
       "LOYALTEXT.NS",
       "M&MFIN.NS",
       "MAANALU.NS",
       "MACPOWER.NS",
       "MADHUCON.NS",
-      "MAGMA.NS",
       "MAHASTEEL.NS",
       "MAHSEAMLES.NS",
       "MAITHANALL.NS",
-      "MANDHANA.NS",
       "MANINFRA.NS",
       "MANORAMA.NS",
       "MAPMYINDIA.NS",
@@ -604,26 +599,19 @@ def check_market():
       "MAXHEALTH.NS",
       "MAYURUNIQ.NS",
       "MBLINFRA.NS",
-      "MCNALLY.NS",
-      "MEGH.NS",
       "MENONBEAR.NS",
-      "MEP.NS",
       "MHRIL.NS",
       "MIDHANI.NS",
       "MINDTECK.NS",
       "MIRZAINT.NS",
       "MITCON.NS",
-      "MMFL.NS",
       "MODISONLTD.NS",
       "MOHITIND.NS",
       "MOLDTKPAC.NS",
       "MONARCH.NS",
       "MOREPENLAB.NS",
-      "Motherson.NS",
       "MOTILALOFS.NS",
-      "MPCON.NS",
       "MPSLTD.NS",
-      "MRSS.NS",
       "MSTCLTD.NS",
       "MUKANDLTD.NS",
       "MUKTAARTS.NS",
@@ -642,18 +630,13 @@ def check_market():
       "NECCLTD.NS",
       "NELCAST.NS",
       "NELCO.NS",
-      "NEML.NS",
-      "NEogen.NS",
       "NESCO.NS",
-      "Network18.NS",
       "NEULANDLAB.NS",
       "NEWGEN.NS",
       "NILKAMAL.NS",
       "NITINSPIN.NS",
       "NKIND.NS",
       "NOCIL.NS",
-      "NULVI.NS",
-      "Nureca.NS",
       "NYKAA.NS",
       "OAL.NS",
       "OBEROIRLTY.NS",
@@ -681,7 +664,10 @@ def check_market():
       "PCJEWELLER.NS",
   ]
 
-  print(f"Starting parallel intraday scan for {len(symbols)} stocks...")
+  print(
+      "Starting parallel intraday institutional scan for"
+      f" {len(symbols)} stocks..."
+  )
 
   alert_triggered = False
   with ThreadPoolExecutor(max_workers=20) as executor:
@@ -691,7 +677,7 @@ def check_market():
         alert_triggered = True
 
   if not alert_triggered:
-    print("Scan completed silently: No breakouts matched at this time.")
+    print("Scan completed silently: No institutional volume breakouts matched.")
 
 
 if __name__ == "__main__":
