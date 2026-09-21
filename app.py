@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import datetime
 from datetime import datetime, time, timedelta
 from bs4 import BeautifulSoup
@@ -254,7 +255,7 @@ def fetch_rolling_institutional_data(symbols):
             vol_ma = df_intraday["Volume"].rolling(window=2000).mean()
             curr_candle_vol = float(df_intraday["Volume"].iloc[-1])
             avg_vol_ma = float(vol_ma.iloc[-1]) if not vol_ma.empty and not pd.isna(vol_ma.iloc[-1]) else 0.0
-            exceptional_vol = curr_candle_vol > (avg_vol_ma * 10.0) if avg_vol_ma > 0 else (curr_candle_vol > 100000)
+            exceptional_vol = curr_candle_vol > (avg_vol_ma * 10.0) if avg_vol_ma > 0 else (curr_candle_vol > 10000)
 
             rsi_15m = compute_rsi(df_intraday["Close"], period=14)
             curr_rsi = float(rsi_15m.iloc[-1])
@@ -589,7 +590,7 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
     return df_results
 
 
-# --- VIJAY THAKKAR MULTIYEAR BREAKOUT & DEMAND ZONE RETEST STRATEGY (CUP & HANDLE RETEST) ---
+# --- VIJAY THAKKAR STRATEGY (MULTIYEAR, MULTIMONTH, MULTIWEEK & TRENDLINE BREAKOUT + RETEST) ---
 @st.cache_data(ttl=300)
 def fetch_vijay_thakkar_strategy(symbols, top_n_count):
     results = []
@@ -604,45 +605,76 @@ def fetch_vijay_thakkar_strategy(symbols, top_n_count):
             df_weekly = ticker.history(period="3y", interval="1wk")
             df_daily = ticker.history(period="6mo", interval="1d")
 
-            if len(df_monthly) < 36 or len(df_weekly) < 40 or len(df_daily) < 50:
+            if len(df_monthly) < 12 or len(df_weekly) < 30 or len(df_daily) < 40:
                 continue
 
             cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
 
-            # 1. Multiyear Breakout Detection: Look at prior monthly resistance (Cup Rim / Multiyear High) formed 12 to 96 months ago
-            historical_monthly_highs = df_monthly["High"].iloc[:-6]  # Exclude most recent few months to find true prior multiyear base high
-            if historical_monthly_highs.empty:
-                continue
-            multiyear_resistance = round(float(historical_monthly_highs.max()), 2)
+            breakout_type = None
+            breakout_level = 0.0
+            retest_details = ""
 
-            # Check that a true multiyear breakout occurred previously (price traded significantly above multiyear resistance in recent months)
-            recent_high_check = df_monthly["High"].tail(12).max()
-            has_multiyear_breakout = recent_high_check > (multiyear_resistance * 1.02)
-            if not has_multiyear_breakout:
+            # 1. Check Multiyear Resistance Breakout (> 12 months ago high)
+            if len(df_monthly) >= 24:
+                historical_monthly_highs = df_monthly["High"].iloc[:-6]
+                if not historical_monthly_highs.empty:
+                    multiyear_res = float(historical_monthly_highs.max())
+                    recent_max = df_monthly["High"].tail(12).max()
+                    if recent_max > multiyear_res * 1.02 and (multiyear_res * 0.93 <= cmp <= multiyear_res * 1.07):
+                        breakout_type = "Multiyear Breakout"
+                        breakout_level = round(multiyear_res, 2)
+                        retest_details = f"Retesting Multiyear Resistance level at ₹{breakout_level}"
+
+            # 2. Check Multimonth Resistance Breakout (3 to 12 months ago high)
+            if not breakout_type and len(df_monthly) >= 6:
+                multimonth_highs = df_monthly["High"].iloc[-12:-3]
+                if not multimonth_highs.empty:
+                    multimonth_res = float(multimonth_highs.max())
+                    recent_wk_max = df_weekly["High"].tail(8).max()
+                    if recent_wk_max > multimonth_res * 1.015 and (multimonth_res * 0.94 <= cmp <= multimonth_res * 1.06):
+                        breakout_type = "Multimonth Breakout"
+                        breakout_level = round(multimonth_res, 2)
+                        retest_details = f"Retesting Multimonth Resistance level at ₹{breakout_level}"
+
+            # 3. Check Multiweek Resistance Breakout (3 to 12 weeks ago high)
+            if not breakout_type and len(df_weekly) >= 15:
+                multiweek_highs = df_weekly["High"].iloc[-12:-3]
+                if not multiweek_highs.empty:
+                    multiweek_res = float(multiweek_highs.max())
+                    recent_day_max = df_daily["High"].tail(10).max()
+                    if recent_day_max > multiweek_res * 1.01 and (multiweek_res * 0.95 <= cmp <= multiweek_res * 1.05):
+                        breakout_type = "Multiweek Breakout"
+                        breakout_level = round(multiweek_res, 2)
+                        retest_details = f"Retesting Multiweek Resistance level at ₹{breakout_level}"
+
+            # 4. Check Trendline Breakout & Retest
+            if not breakout_type and len(df_weekly) >= 20:
+                highs = df_weekly["High"].tail(24).values
+                x = np.arange(len(highs))
+                slope, intercept = np.polyfit(x[:18], highs[:18], 1)
+                if slope <= 0.05:  # Flat or downward sloping trendline resistance
+                    trendline_val = slope * (len(highs) - 1) + intercept
+                    recent_breakout_check = highs[-6:].max()
+                    if recent_breakout_check > trendline_val * 1.01 and (trendline_val * 0.95 <= cmp <= trendline_val * 1.06):
+                        breakout_type = "Trendline Breakout"
+                        breakout_level = round(trendline_val, 2)
+                        retest_details = f"Retesting Trendline Resistance line at ₹{breakout_level}"
+
+            if not breakout_type:
                 continue
 
-            # 2. Retest of Demand Zone / Breakout Level (Handle Formation / Pullback to Support)
-            # The current price should have pulled back gracefully back toward or slightly above the multiyear breakout zone (Cup & Handle handle support)
-            zone_lower = multiyear_resistance * 0.94
-            zone_upper = multiyear_resistance * 1.08
-            is_retesting_demand = (cmp >= zone_lower) and (cmp <= zone_upper)
-            if not is_retesting_demand:
-                continue
-
-            # 3. Daily Confirmation & Momentum Check
+            # Daily Confirmation & Momentum Check
             daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
-            daily_sma50 = df_daily["Close"].rolling(window=50).mean().iloc[-1]
-            is_bullish_support_reaction = (cmp >= daily_sma50 * 0.97) and (40 <= daily_rsi <= 65)
+            daily_sma50 = df_daily["High"].rolling(window=50).mean().iloc[-1] if len(df_daily) >= 50 else df_daily["Close"].rolling(window=20).mean().iloc[-1]
+            is_bullish_support_reaction = (cmp >= daily_sma50 * 0.96) and (38 <= daily_rsi <= 68)
             if not is_bullish_support_reaction:
                 continue
 
-            # Target & Risk Setup
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
             entry = cmp
-            # Stop loss tightly placed below the handle/retest support zone base
-            calculated_sl = round(multiyear_resistance * 0.92, 2)
+            calculated_sl = round(breakout_level * 0.92, 2)
             sl = min(calculated_sl, round(entry * 0.94, 2))
             if sl >= entry:
                 sl = round(entry * 0.95, 2)
@@ -652,25 +684,33 @@ def fetch_vijay_thakkar_strategy(symbols, top_n_count):
                 continue
 
             t1 = round(entry + (risk * 2.0), 2)
-            t2 = round(entry + (risk * 4.0), 2)  # High reward target reflecting multiyear continuation
+            t2 = round(entry + (risk * 4.0), 2)
 
-            # Scoring based on Vijay Thakkar cup-and-handle breakout structural strength
-            base_prob = 74.0
-            breakout_magnitude_pct = round(((recent_high_check - multiyear_resistance) / multiyear_resistance) * 100, 2)
-            win_prob = round(min(max(base_prob + (breakout_magnitude_pct * 0.1), 70.0), 98.0), 1)
-            raw_score = win_prob + breakout_magnitude_pct
+            base_prob = 73.0
+            if "Multiyear" in breakout_type:
+                base_prob += 5.0
+            elif "Multimonth" in breakout_type:
+                base_prob += 3.5
+            elif "Trendline" in breakout_type:
+                base_prob += 4.0
+            else:
+                base_prob += 2.0
+
+            win_prob = round(min(max(base_prob, 70.0), 98.0), 1)
+            raw_score = win_prob + ((cmp - breakout_level) / breakout_level * 100 if breakout_level > 0 else 0)
 
             results.append({
                 "Symbol": clean_sym,
                 "Signal": "VIJAY THAKKAR BREAKOUT BUY",
                 "Win Probability (%)": f"{win_prob}%",
-                "Multiyear Resistance (₹)": f"₹{multiyear_resistance}",
+                "Breakout Type": breakout_type,
+                "Retest Status": retest_details,
+                "Breakout Level (₹)": f"₹{breakout_level}",
                 "Weekly Close (₹)": f"₹{cmp}",
-                "Retest Zone (₹)": f"₹{multiyear_resistance}",
                 "Tight Entry (₹)": f"₹{entry}",
                 "Small SL (₹)": f"₹{sl}",
                 "Target 1 (2x Risk) (₹)": f"₹{t1}",
-                "Target 2 (4x Risk Cup Continuation) (₹)": f"₹{t2}",
+                "Target 2 (4x Risk Continuation) (₹)": f"₹{t2}",
                 "RawVolume": df_weekly["Volume"].iloc[-1],
                 "RawWinProb": win_prob,
                 "RawScore": raw_score,
