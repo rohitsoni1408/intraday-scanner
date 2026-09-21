@@ -1,3 +1,4 @@
+name=app_2.py
 import datetime
 from datetime import datetime, time, timedelta
 from bs4 import BeautifulSoup
@@ -6,6 +7,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import yfinance as yf
+from zoneinfo import ZoneInfo
 
 # Page Configuration
 st.set_page_config(
@@ -36,9 +38,16 @@ st.markdown(
 )
 
 
-# --- MARKET STATUS HELPER ---
+# --- MARKET STATUS HELPER (FIXED FOR IST) ---
 def is_market_closed():
-    now = datetime.now()
+    try:
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    except Exception:
+        # Fallback to UTC offset for IST (+5:30) if zoneinfo fails
+        from datetime import timezone
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(IST)
+        
     if now.weekday() >= 5:
         return True
     market_open = time(9, 15)
@@ -795,17 +804,14 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
             df_hist['time_diff'] = abs(df_hist.index - pd.Timestamp(target_datetime))
             closest_row = df_hist.loc[df_hist['time_diff'].idxmin()]
             
-            # Check if entry is allowed based on exact time frame candle volume or momentum validation
             candle_time = closest_row.name.time()
             candle_vol = float(closest_row["Volume"])
             candle_close = float(closest_row["Close"])
             candle_open = float(closest_row["Open"])
             
-            # Entry allowance filter rule: requires volume threshold or candle confirmation at the requested time
             is_entry_allowed = candle_vol >= 20000 and candle_close >= 50.0
 
             if not is_entry_allowed:
-                # If entry not allowed at this time slice
                 if direction_filter != "All (Buy & Sell)" and not (
                     (direction_filter == "Buy (Long Only)" and candle_close >= candle_open) or
                     (direction_filter == "Sell (Short Only)" and candle_close < candle_open)
@@ -834,7 +840,6 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
                 })
                 continue
 
-            # Determine Buy or Sell classification based on session candle action
             is_buy = candle_close >= candle_open
             
             if direction_filter == "Buy (Long Only)" and not is_buy:
