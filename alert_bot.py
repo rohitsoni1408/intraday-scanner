@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, time
+from datetime import datetime
 import json
 import os
 import pandas as pd
@@ -59,7 +59,6 @@ def send_telegram_alert(message):
 
 
 def get_top_500_universe():
-  """Generates a market-cap ordered pool of top NSE symbols up to top 500."""
   market_cap_tier_1 = [
       "RELIANCE",
       "TCS",
@@ -255,7 +254,6 @@ def process_symbol(sym):
     if df.empty or len(df) < 5:
       return None
 
-    # Proper Timezone Conversion to IST
     if df.index.tz is not None:
       df.index = df.index.tz_convert("Asia/Kolkata")
       df.index = df.index.tz_localize(None)
