@@ -476,7 +476,6 @@ def process_rolling_confluence(
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols, top_n_count):
     results = []
-    # Scan the provided universe pool comprehensively
     for sym in symbols:
         clean_sym = sym.upper().strip()
         if clean_sym.startswith("STOCK"):
@@ -488,7 +487,6 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             df_monthly = ticker.history(period="5y", interval="1mo")
             df_daily = ticker.history(period="6mo", interval="1d")
             
-            # Fetch quarterly candles safely
             try:
                 df_quarterly = ticker.history(period="10y", interval="3mo")
                 if df_quarterly.empty:
@@ -508,7 +506,6 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             if cmp < 50.0:
                 continue
 
-            # --- STEP 1: GTF HIGHER TIMEFRAME (HTF) DEMAND/SUPPLY ANALYSIS ---
             monthly_demand_low = round(float(df_monthly["Low"].tail(12).min()), 2)
             monthly_demand_high = round(float(df_monthly["Low"].tail(12).quantile(0.35)), 2)
             
@@ -524,19 +521,15 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             at_htf_demand = hit_monthly_demand or hit_quarterly_demand or (cmp <= monthly_demand_low * 1.05)
 
             if not at_htf_demand:
-                # GTF Rule: Only trade when price respects Higher Timeframe Demand/Support zones
                 continue
 
-            # --- STEP 2: GTF LOWER TIMEFRAME (LTF / DAILY) PULLBACK & CONFIRMATION ---
             daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
             daily_trend_up = df_daily["Close"].iloc[-1] > df_daily["Close"].iloc[-20]
             
-            # Check for lower timeframe bullish reaction/pullback completion
             ltf_pullback_confirmed = (daily_rsi < 60) and (daily_rsi > 38) and daily_trend_up
             if not ltf_pullback_confirmed:
                 continue
 
-            # --- STEP 3: 1-4 WEEK DURATION TARGET & HIGHEST PROFIT OPTIMIZATION ---
             all_highs = pd.concat([df_weekly["High"].tail(12), df_monthly["High"].tail(6)])
             overhead_highs = all_highs[all_highs > cmp]
             best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.15, 2)
@@ -555,10 +548,9 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             if risk <= 0:
                 continue
                 
-            t1 = round(entry + (risk * 1.5), 2)  # Target 1 (1-2 Weeks)
-            t2 = round(entry + (risk * 3.0), 2)  # Target 2 (Highest Profit within 3-4 Weeks window)
+            t1 = round(entry + (risk * 1.5), 2)
+            t2 = round(entry + (risk * 3.0), 2)
 
-            # Win Probability & Profit Scoring tuned for GTF MTF Confluence & 1-4W Return
             base_prob = 68.0
             if hit_quarterly_demand:
                 base_prob += 14.0
@@ -567,7 +559,7 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             
             target_potential_pct = round(((t2 - entry) / entry) * 100, 2)
             win_prob = round(min(max(base_prob + (target_potential_pct * 0.2), 65.0), 97.5), 1)
-            raw_score = win_prob + target_potential_pct  # Optimized for highest profit potential in 1-4 weeks
+            raw_score = win_prob + target_potential_pct
 
             zone_tag = "Quarterly Demand 🎯" if hit_quarterly_demand else ("Monthly Demand 🟢" if hit_monthly_demand else "HTF Support")
 
@@ -591,6 +583,102 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
         except Exception:
             continue
             
+    df_results = pd.DataFrame(results)
+    if not df_results.empty:
+        df_results = df_results.sort_values(by=["RawScore", "RawWinProb"], ascending=False).head(top_n_count)
+    return df_results
+
+
+# --- VIJAY THAKKAR MULTIYEAR BREAKOUT & DEMAND ZONE RETEST STRATEGY (CUP & HANDLE RETEST) ---
+@st.cache_data(ttl=300)
+def fetch_vijay_thakkar_strategy(symbols, top_n_count):
+    results = []
+    for sym in symbols:
+        clean_sym = sym.upper().strip()
+        if clean_sym.startswith("STOCK"):
+            continue
+        ticker_sym = f"{clean_sym}.NS"
+        try:
+            ticker = yf.Ticker(ticker_sym)
+            df_monthly = ticker.history(period="10y", interval="1mo")
+            df_weekly = ticker.history(period="3y", interval="1wk")
+            df_daily = ticker.history(period="6mo", interval="1d")
+
+            if len(df_monthly) < 36 or len(df_weekly) < 40 or len(df_daily) < 50:
+                continue
+
+            cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
+            if cmp < 50.0:
+                continue
+
+            # 1. Multiyear Breakout Detection: Look at prior monthly resistance (Cup Rim / Multiyear High) formed 12 to 96 months ago
+            historical_monthly_highs = df_monthly["High"].iloc[:-6]  # Exclude most recent few months to find true prior multiyear base high
+            if historical_monthly_highs.empty:
+                continue
+            multiyear_resistance = round(float(historical_monthly_highs.max()), 2)
+
+            # Check that a true multiyear breakout occurred previously (price traded significantly above multiyear resistance in recent months)
+            recent_high_check = df_monthly["High"].tail(12).max()
+            has_multiyear_breakout = recent_high_check > (multiyear_resistance * 1.02)
+            if not has_multiyear_breakout:
+                continue
+
+            # 2. Retest of Demand Zone / Breakout Level (Handle Formation / Pullback to Support)
+            # The current price should have pulled back gracefully back toward or slightly above the multiyear breakout zone (Cup & Handle handle support)
+            zone_lower = multiyear_resistance * 0.94
+            zone_upper = multiyear_resistance * 1.08
+            is_retesting_demand = (cmp >= zone_lower) and (cmp <= zone_upper)
+            if not is_retesting_demand:
+                continue
+
+            # 3. Daily Confirmation & Momentum Check
+            daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
+            daily_sma50 = df_daily["Close"].rolling(window=50).mean().iloc[-1]
+            is_bullish_support_reaction = (cmp >= daily_sma50 * 0.97) and (40 <= daily_rsi <= 65)
+            if not is_bullish_support_reaction:
+                continue
+
+            # Target & Risk Setup
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+            entry = cmp
+            # Stop loss tightly placed below the handle/retest support zone base
+            calculated_sl = round(multiyear_resistance * 0.92, 2)
+            sl = min(calculated_sl, round(entry * 0.94, 2))
+            if sl >= entry:
+                sl = round(entry * 0.95, 2)
+
+            risk = entry - sl
+            if risk <= 0:
+                continue
+
+            t1 = round(entry + (risk * 2.0), 2)
+            t2 = round(entry + (risk * 4.0), 2)  # High reward target reflecting multiyear continuation
+
+            # Scoring based on Vijay Thakkar cup-and-handle breakout structural strength
+            base_prob = 74.0
+            breakout_magnitude_pct = round(((recent_high_check - multiyear_resistance) / multiyear_resistance) * 100, 2)
+            win_prob = round(min(max(base_prob + (breakout_magnitude_pct * 0.1), 70.0), 98.0), 1)
+            raw_score = win_prob + breakout_magnitude_pct
+
+            results.append({
+                "Symbol": clean_sym,
+                "Signal": "VIJAY THAKKAR BREAKOUT BUY",
+                "Win Probability (%)": f"{win_prob}%",
+                "Multiyear Resistance (₹)": f"₹{multiyear_resistance}",
+                "Weekly Close (₹)": f"₹{cmp}",
+                "Retest Zone (₹)": f"₹{multiyear_resistance}",
+                "Tight Entry (₹)": f"₹{entry}",
+                "Small SL (₹)": f"₹{sl}",
+                "Target 1 (2x Risk) (₹)": f"₹{t1}",
+                "Target 2 (4x Risk Cup Continuation) (₹)": f"₹{t2}",
+                "RawVolume": df_weekly["Volume"].iloc[-1],
+                "RawWinProb": win_prob,
+                "RawScore": raw_score,
+                "Chart": chart_link,
+            })
+        except Exception:
+            continue
+
     df_results = pd.DataFrame(results)
     if not df_results.empty:
         df_results = df_results.sort_values(by=["RawScore", "RawWinProb"], ascending=False).head(top_n_count)
@@ -751,7 +839,7 @@ def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_po
             t1 = round(entry_price + (risk * 1.5), 2)
             t2 = round(entry_price + (risk * 2.8), 2)
             
-            df_future = df_weekly[df_weekly.index > pd.Timestamp(start_dt)].head(4) # 1-4 weeks window
+            df_future = df_weekly[df_weekly.index > pd.Timestamp(start_dt)].head(4)
             if df_future.empty:
                 continue
                 
@@ -774,9 +862,11 @@ def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_po
                 status, pnl_val, win_prob = ("⏳ Active (Within 4W)", pnl, "65.0%")
                 raw_score = 65.0 + pnl
 
+            signal_label = "VIJAY THAKKAR BREAKOUT BUY" if "Vijay Thakkar" in selected_strategy else "GTF MTF WEEKLY BUY"
+
             results.append({
                 "Symbol": clean_sym,
-                "Signal": "GTF MTF WEEKLY BUY",
+                "Signal": signal_label,
                 "Win Probability (%)": win_prob,
                 "Entry Date": target_date.strftime("%Y-%m-%d"),
                 "Tight Entry (₹)": f"₹{entry_price}",
@@ -1059,6 +1149,7 @@ with main_tab3:
         "Choose Weekly / Swing Strategy:",
         [
             "Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)",
+            "Vijay Thakkar Multiyear Breakout & Demand Retest Strategy (Cup & Handle)",
             "Daily Momentum Strategy (MACD Crossover + VWAP + RSI > 55)",
             "Elite Swing Strategy (MTF Trend Pullback & Dip Buy)"
         ]
@@ -1066,9 +1157,11 @@ with main_tab3:
 
     if strat_mode == "Live Strategy Scanner":
         if st.button("🚀 Run Selected Strategy Scan", type="primary", use_container_width=True):
-            with st.spinner(f"Executing GTF MTF scan over Top {universe_limit} Nifty stocks for: {selected_strategy}..."):
+            with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_strategy}..."):
                 if "Weekly Higher-Timeframe" in selected_strategy:
                     df_res = fetch_weekly_mtf_strategy(active_universe_pool, selected_count)
+                elif "Vijay Thakkar" in selected_strategy:
+                    df_res = fetch_vijay_thakkar_strategy(active_universe_pool, selected_count)
                 elif "Daily Momentum" in selected_strategy:
                     df_res = fetch_daily_momentum_strategy(active_universe_pool, selected_count)
                 else:
@@ -1085,7 +1178,7 @@ with main_tab3:
     else:
         bt_weekly_date = st.date_input("📅 Select Historical Weekly Entry Date", value=datetime.today().date() - timedelta(days=90))
         if st.button("🚀 Run Weekly Strategy Backtest", type="primary", use_container_width=True):
-            with st.spinner("Backtesting GTF weekly historical setups over subsequent 1-4 weeks..."):
+            with st.spinner("Backtesting weekly historical setups over subsequent 1-4 weeks..."):
                 df_wk_bt = run_weekly_backtest(bt_weekly_date, selected_strategy, selected_count, active_universe_pool)
                 st.session_state["df_weekly_bt_results"] = df_wk_bt
 
