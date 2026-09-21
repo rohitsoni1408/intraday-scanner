@@ -56,7 +56,7 @@ def is_market_closed():
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **Rolling Institutional Breakouts**, **VWAP Confluence**, and **Intraday RSI Divergence**."
+    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, and **Weekly Income Strategies**."
 )
 
 # --- GLOBAL SCAN CONTROLS ---
@@ -472,10 +472,11 @@ def process_rolling_confluence(
     return df_buy, df_sell
 
 
-# --- UPDATED STRATEGY: WEEKLY HIGHER-TIMEFRAME MTF STRATEGY (SUPPLY / DEMAND) ---
+# --- GTF MULTIPLE TIMEFRAME ANALYSIS (MTFA) & HIGHEST PROFIT 1-4W STRATEGY ---
 @st.cache_data(ttl=300)
 def fetch_weekly_mtf_strategy(symbols, top_n_count):
     results = []
+    # Scan the provided universe pool comprehensively
     for sym in symbols:
         clean_sym = sym.upper().strip()
         if clean_sym.startswith("STOCK"):
@@ -485,8 +486,9 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             ticker = yf.Ticker(ticker_sym)
             df_weekly = ticker.history(period="2y", interval="1wk")
             df_monthly = ticker.history(period="5y", interval="1mo")
+            df_daily = ticker.history(period="6mo", interval="1d")
             
-            # Fetch quarterly candles safely (or resample from monthly if unavailable)
+            # Fetch quarterly candles safely
             try:
                 df_quarterly = ticker.history(period="10y", interval="3mo")
                 if df_quarterly.empty:
@@ -499,14 +501,14 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
                 else:
                     df_quarterly = pd.DataFrame()
 
-            if len(df_weekly) < 20 or len(df_monthly) < 6:
+            if len(df_weekly) < 20 or len(df_monthly) < 6 or len(df_daily) < 30:
                 continue
 
             cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
 
-            # --- HIGHER TIMEFRAME DEMAND ZONES (MONTHLY & QUARTERLY) ---
+            # --- STEP 1: GTF HIGHER TIMEFRAME (HTF) DEMAND/SUPPLY ANALYSIS ---
             monthly_demand_low = round(float(df_monthly["Low"].tail(12).min()), 2)
             monthly_demand_high = round(float(df_monthly["Low"].tail(12).quantile(0.35)), 2)
             
@@ -517,29 +519,32 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
                 quarterly_demand_low = monthly_demand_low * 0.95
                 quarterly_demand_high = monthly_demand_high * 0.95
 
-            # Check if price has hit/interacted with Monthly or Quarterly Demand Zones
             hit_monthly_demand = (cmp >= monthly_demand_low * 0.97) and (cmp <= monthly_demand_high * 1.08)
             hit_quarterly_demand = (cmp >= quarterly_demand_low * 0.97) and (cmp <= quarterly_demand_high * 1.08)
             at_htf_demand = hit_monthly_demand or hit_quarterly_demand or (cmp <= monthly_demand_low * 1.05)
 
-            # Overhead Supply Zone for 1-4 Week Target Window
+            if not at_htf_demand:
+                # GTF Rule: Only trade when price respects Higher Timeframe Demand/Support zones
+                continue
+
+            # --- STEP 2: GTF LOWER TIMEFRAME (LTF / DAILY) PULLBACK & CONFIRMATION ---
+            daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
+            daily_trend_up = df_daily["Close"].iloc[-1] > df_daily["Close"].iloc[-20]
+            
+            # Check for lower timeframe bullish reaction/pullback completion
+            ltf_pullback_confirmed = (daily_rsi < 60) and (daily_rsi > 38) and daily_trend_up
+            if not ltf_pullback_confirmed:
+                continue
+
+            # --- STEP 3: 1-4 WEEK DURATION TARGET & HIGHEST PROFIT OPTIMIZATION ---
             all_highs = pd.concat([df_weekly["High"].tail(12), df_monthly["High"].tail(6)])
             overhead_highs = all_highs[all_highs > cmp]
-            best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.12, 2)
+            best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.15, 2)
             if best_supply_zone <= cmp:
-                best_supply_zone = round(cmp * 1.10, 2)
-
-            # Technical Confluence Indicators
-            rsi_series = compute_rsi(df_weekly["Close"], period=14)
-            curr_rsi = round(float(rsi_series.iloc[-1]), 2)
-            
-            weekly_vol_mean = df_weekly["Volume"].tail(12).mean()
-            curr_weekly_vol = df_weekly["Volume"].iloc[-1]
-            vol_ratio = float(curr_weekly_vol / weekly_vol_mean) if weekly_vol_mean > 0 else 1.0
+                best_supply_zone = round(cmp * 1.12, 2)
 
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
 
-            # 1-4 Week Swing Risk/Reward Setup
             entry = cmp
             calculated_sl = round(float(df_weekly["Low"].tail(3).min()) * 0.985, 2)
             sl = max(calculated_sl, round(entry * 0.95, 2))
@@ -550,42 +555,35 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             if risk <= 0:
                 continue
                 
-            t1 = round(entry + (risk * 1.5), 2)  # Target 1 within 1-2 weeks
-            t2 = round(entry + (risk * 2.8), 2)  # Target 2 within 3-4 weeks
+            t1 = round(entry + (risk * 1.5), 2)  # Target 1 (1-2 Weeks)
+            t2 = round(entry + (risk * 3.0), 2)  # Target 2 (Highest Profit within 3-4 Weeks window)
 
-            # Scoring and Win Probability tuned for HTF Demand + 1-4 Week Window
-            base_prob = 64.0
+            # Win Probability & Profit Scoring tuned for GTF MTF Confluence & 1-4W Return
+            base_prob = 68.0
             if hit_quarterly_demand:
-                base_prob += 12.5
+                base_prob += 14.0
             elif hit_monthly_demand:
-                base_prob += 9.5
+                base_prob += 10.5
             
-            if vol_ratio > 1.1:
-                base_prob += 5.0
-                
-            headroom_pct = ((best_supply_zone - entry) / entry) * 100
-            base_prob += min(headroom_pct * 0.3, 6.0)
-
-            win_prob = round(min(max(base_prob, 60.0), 95.5), 1)
             target_potential_pct = round(((t2 - entry) / entry) * 100, 2)
-            raw_score = win_prob + target_potential_pct
+            win_prob = round(min(max(base_prob + (target_potential_pct * 0.2), 65.0), 97.5), 1)
+            raw_score = win_prob + target_potential_pct  # Optimized for highest profit potential in 1-4 weeks
 
-            zone_tag = "Quarterly Demand Zone 🎯" if hit_quarterly_demand else ("Monthly Demand Zone 🟢" if hit_monthly_demand else "HTF Support Zone")
+            zone_tag = "Quarterly Demand 🎯" if hit_quarterly_demand else ("Monthly Demand 🟢" if hit_monthly_demand else "HTF Support")
 
             results.append({
                 "Symbol": clean_sym,
-                "Signal": "WEEKLY HTF BUY",
+                "Signal": "GTF MTF WEEKLY BUY",
                 "Win Probability (%)": f"{win_prob}%",
-                "HTF Zone Hit": zone_tag,
+                "GTF HTF Zone": zone_tag,
                 "Weekly Close (₹)": f"₹{cmp}",
                 "Supply Zone (₹)": f"₹{best_supply_zone}",
-                "1-4W Target Potential (%)": f"{target_potential_pct:+.2f}%",
-                "Weekly RSI": curr_rsi,
+                "1-4W Max Profit Potential (%)": f"{target_potential_pct:+.2f}%",
                 "Tight Entry (₹)": f"₹{entry}",
                 "Small SL (₹)": f"₹{sl}",
                 "Target 1 (1-2W) (₹)": f"₹{t1}",
-                "Target 2 (3-4W) (₹)": f"₹{t2}",
-                "RawVolume": curr_weekly_vol,
+                "Target 2 (3-4W Max Profit) (₹)": f"₹{t2}",
+                "RawVolume": df_weekly["Volume"].iloc[-1],
                 "RawWinProb": win_prob,
                 "RawScore": raw_score,
                 "Chart": chart_link,
@@ -595,7 +593,7 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             
     df_results = pd.DataFrame(results)
     if not df_results.empty:
-        df_results = df_results.sort_values(by=["RawWinProb", "RawScore"], ascending=False).head(top_n_count)
+        df_results = df_results.sort_values(by=["RawScore", "RawWinProb"], ascending=False).head(top_n_count)
     return df_results
 
 
@@ -753,7 +751,7 @@ def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_po
             t1 = round(entry_price + (risk * 1.5), 2)
             t2 = round(entry_price + (risk * 2.8), 2)
             
-            df_future = df_weekly[df_weekly.index > pd.Timestamp(start_dt)].head(4) # Target 1-4 weeks window
+            df_future = df_weekly[df_weekly.index > pd.Timestamp(start_dt)].head(4) # 1-4 weeks window
             if df_future.empty:
                 continue
                 
@@ -763,8 +761,8 @@ def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_po
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
             
             if max_future_high >= t2:
-                status, pnl_val, win_prob = ("🎯 Target 2 Hit (3-4W)", round(((t2 - entry_price) / entry_price) * 100, 2), "94.5%")
-                raw_score = 94.5 + pnl_val
+                status, pnl_val, win_prob = ("🎯 Target 2 Hit (Highest Profit 3-4W)", round(((t2 - entry_price) / entry_price) * 100, 2), "95.5%")
+                raw_score = 95.5 + pnl_val
             elif max_future_high >= t1:
                 status, pnl_val, win_prob = ("🎯 Target 1 Hit (1-2W)", round(((t1 - entry_price) / entry_price) * 100, 2), "82.0%")
                 raw_score = 82.0 + pnl_val
@@ -778,14 +776,14 @@ def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_po
 
             results.append({
                 "Symbol": clean_sym,
-                "Signal": "WEEKLY HTF BUY",
+                "Signal": "GTF MTF WEEKLY BUY",
                 "Win Probability (%)": win_prob,
                 "Entry Date": target_date.strftime("%Y-%m-%d"),
                 "Tight Entry (₹)": f"₹{entry_price}",
                 "Supply Zone (₹)": f"₹{best_supply_zone}",
                 "Small SL (₹)": f"₹{sl}",
                 "Target 1 (1-2W) (₹)": f"₹{t1}",
-                "Target 2 (3-4W) (₹)": f"₹{t2}",
+                "Target 2 (3-4W Max Profit) (₹)": f"₹{t2}",
                 "Status": status,
                 "P&L (%)": f"{pnl_val:+.2f}%",
                 "RawPnL": pnl_val,
@@ -1068,7 +1066,7 @@ with main_tab3:
 
     if strat_mode == "Live Strategy Scanner":
         if st.button("🚀 Run Selected Strategy Scan", type="primary", use_container_width=True):
-            with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_strategy}..."):
+            with st.spinner(f"Executing GTF MTF scan over Top {universe_limit} Nifty stocks for: {selected_strategy}..."):
                 if "Weekly Higher-Timeframe" in selected_strategy:
                     df_res = fetch_weekly_mtf_strategy(active_universe_pool, selected_count)
                 elif "Daily Momentum" in selected_strategy:
@@ -1087,7 +1085,7 @@ with main_tab3:
     else:
         bt_weekly_date = st.date_input("📅 Select Historical Weekly Entry Date", value=datetime.today().date() - timedelta(days=90))
         if st.button("🚀 Run Weekly Strategy Backtest", type="primary", use_container_width=True):
-            with st.spinner("Backtesting weekly historical setups over subsequent 1-4 weeks..."):
+            with st.spinner("Backtesting GTF weekly historical setups over subsequent 1-4 weeks..."):
                 df_wk_bt = run_weekly_backtest(bt_weekly_date, selected_strategy, selected_count, active_universe_pool)
                 st.session_state["df_weekly_bt_results"] = df_wk_bt
 
