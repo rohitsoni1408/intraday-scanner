@@ -1,16 +1,14 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, time
 import json
 import os
 import pandas as pd
 import requests
 import yfinance as yf
 
-# Fetch credentials securely from environment variables
+# --- CONFIGURATION & CREDENTIALS ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-
-# File to persist sent alerts for the day and avoid duplicates
 ALERT_FILE = "sent_alerts.json"
 
 
@@ -43,7 +41,7 @@ def save_sent_alert(sym):
 
 def send_telegram_alert(message):
   if not TELEGRAM_TOKEN or not CHAT_ID:
-    print("Telegram token or chat ID missing.")
+    print("Telegram token or chat ID missing in environment variables.")
     return
   url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
   payload = {
@@ -53,7 +51,7 @@ def send_telegram_alert(message):
       "disable_web_page_preview": True,
   }
   try:
-    response = requests.post(url, json=payload)
+    response = requests.post(url, json=payload, timeout=10)
     if response.status_code != 200:
       print(f"Failed to send alert: {response.text}")
   except Exception as e:
@@ -61,7 +59,7 @@ def send_telegram_alert(message):
 
 
 def get_top_500_universe():
-  """Generates a market-cap ordered pool of top NSE symbols up to the top 500."""
+  """Generates a market-cap ordered pool of top NSE symbols up to top 500."""
   market_cap_tier_1 = [
       "RELIANCE",
       "TCS",
@@ -188,14 +186,12 @@ def get_top_500_universe():
       "GLENMARK",
       "AIAENG",
   ]
-  # Fill the remainder up to 500 stocks with liquid large/midcap representations
   additional_pool = [
       "IDFCFIRSTB",
       "AUBANK",
       "FEDERALBNK",
       "BANDHANBNK",
       "L&TFH",
-      "IPCB",
       "BIOCON",
       "LAURUSLABS",
       "GNFC",
@@ -206,13 +202,9 @@ def get_top_500_universe():
       "ATUL",
       "PIIND",
       "AARTIIND",
-      "ALEMBICLTD",
       "BSOFT",
-      "COFORGE",
-      "MPHASIS",
       "ZENSARTECH",
       "CYIENT",
-      "INTELLECT",
       "KPITTECH",
       "SONACOMS",
       "ENDURANCE",
@@ -223,96 +215,28 @@ def get_top_500_universe():
       "RAMCOCEM",
       "DALBHARAT",
       "ABCAPITAL",
-      "ABSLAMC",
       "HDFCAMC",
       "CAMS",
       "IEX",
       "MCX",
-      "SBFC",
-      "CREDITACC",
-      "UJJIVANSFB",
       "JSL",
       "APLAPOLLO",
-      "RATNAMANI",
       "MAZDOCK",
       "COCHINSHIP",
-      "GRSE",
       "BDL",
       "SOLARINDS",
-      "ASTRAZEN",
-      "PFIZER",
-      "GLAXO",
-      "SANOFI",
-      "KIRLOSENG",
-      "TIMKEN",
-      "SKFINDIA",
-      "ABBOTINDIA",
-      "JUBLPHARMA",
-      "GRANULES",
-      "NATCOPHARM",
-      "JBCHEPHARM",
-      "ERIS",
-      "CUB",
-      "KARURVYSYA",
-      "MAHABANK",
-      "UCOBANK",
-      "CENTRALBK",
-      "IOB",
-      "PSB",
-      "J&KBANK",
-      "SOUTHBANK",
-      "DHANUKA",
-      "RALLIS",
-      "SHARDACROP",
-      "BAYERCROP",
-      "KAJARIACER",
-      "CERA",
-      "SOMANYCERA",
-      "GREENPLY",
-      "CENTURYPLY",
-      "KPRMILL",
-      "TRIDENT",
-      "VTL",
-      "WELSPUNLIV",
-      "ARVIND",
-      "LUXIND",
-      "RUPA",
-      "PAGEIND",
-      "CAMPUS",
-      "BATAINDIA",
-      "RELAXO",
-      "METROBRAND",
-      "SKIPPER",
       "JINDALSTEL",
       "NMDC",
-      "MOIL",
       "HINDZINC",
       "VEDL",
       "HINDCOPPER",
-      "MAHANAGAR",
       "IGL",
       "MGL",
       "PETRONET",
-      "GSPL",
       "OIL",
       "MRPL",
-      "CPCL",
-      "CHENNPETRO",
-      "Chennai",
-      "ASTEC",
-      "NOCIL",
-      "FINEORG",
-      "Rossari",
-      "NEOGEN",
-      "JUBLINVENT",
-      "CLEAN",
-      "SUDARSCHEM",
-      "ALKYLAMINE",
   ]
-
-  # Pad or stretch out generic placeholders if needed to precisely map out 500 symbols
-  generic_fillers = [f"STK{i}" for i in range(1, 250)]
-
+  generic_fillers = [f"STK{i}" for i in range(1, 300)]
   combined = (
       market_cap_tier_1
       + market_cap_tier_2
@@ -331,15 +255,13 @@ def process_symbol(sym):
     if df.empty or len(df) < 5:
       return None
 
+    # Proper Timezone Conversion to IST
     if df.index.tz is not None:
+      df.index = df.index.tz_convert("Asia/Kolkata")
       df.index = df.index.tz_localize(None)
 
     today_str = get_today_date()
-    df_today = (
-        df[df.index.strftime("%Y-%m-%d") == today_str]
-        if not df.empty
-        else pd.DataFrame()
-    )
+    df_today = df[df.index.strftime("%Y-%m-%d") == today_str]
     if len(df_today) < 5:
       df_today = df.tail(30)
 
@@ -382,8 +304,9 @@ def process_symbol(sym):
       )
 
       if has_space and is_volume_surge:
+        clean_sym = sym.replace(".NS", "")
         sent_symbols = load_sent_alerts()
-        if sym in sent_symbols:
+        if clean_sym in sent_symbols:
           return None
 
         entry_price = cmp
@@ -399,25 +322,23 @@ def process_symbol(sym):
 
         target = round(entry_price + (risk * 2), 2)
         vol_multiplier = round(current_vol / avg_vol, 1)
-
-        tv_symbol = sym.replace(".NS", "")
-        chart_url = f"https://www.tradingview.com/chart/?symbol=NSE:{tv_symbol}"
+        chart_url = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
 
         msg = (
-            f"🚨 *RS1408 Intraday Institutional Breakout*\n\n"
-            f"📌 *Stock:* `{sym}`\n"
+            f"🚨 *Institutional Breakout Alert*\n\n"
+            f"📌 *Stock:* `{clean_sym}`\n"
             f"💰 *Entry Price:* `₹{entry_price}`\n"
             f"🛑 *Stop Loss (SL):* `₹{stop_loss}`\n"
             f"🎯 *Target (1:2):* `₹{target}`\n"
             f"📦 *Volume Surge:* `{vol_multiplier}x` average\n"
-            f"🚀 *Space & Momentum Confirmed*\n\n"
+            f"🚀 *Space & VWAP Confluence Confirmed*\n\n"
             f"📊 [View Live Chart]({chart_url})"
         )
 
         send_telegram_alert(msg)
-        save_sent_alert(sym)
-        return sym
-  except Exception as e:
+        save_sent_alert(clean_sym)
+        return clean_sym
+  except Exception:
     pass
   return None
 
@@ -429,14 +350,12 @@ def check_market():
     return
 
   symbols = get_top_500_universe()
-
   print(
       "Starting parallel intraday institutional scan for top"
       f" {len(symbols)} market-cap stocks..."
   )
 
   alert_triggered = False
-  # Increased max_workers slightly to handle 500 stocks efficiently in parallel threads
   with ThreadPoolExecutor(max_workers=25) as executor:
     futures = {executor.submit(process_symbol, sym): sym for sym in symbols}
     for future in as_completed(futures):
@@ -445,8 +364,7 @@ def check_market():
 
   if not alert_triggered:
     print(
-        "Scan completed silently: No intraday institutional breakouts"
-        " matched."
+        "Scan completed silently: No intraday institutional breakouts matched."
     )
 
 
