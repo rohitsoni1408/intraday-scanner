@@ -1,4 +1,3 @@
-name=app_2.py
 import datetime
 from datetime import datetime, time, timedelta
 from bs4 import BeautifulSoup
