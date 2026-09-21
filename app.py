@@ -219,9 +219,17 @@ def fetch_rolling_institutional_data(symbols):
             if df_intraday.empty or len(df_intraday) < 15:
                 continue
 
-            day_open = round(float(df_intraday.iloc[0]["Open"]), 2)
-            day_high = round(float(df_intraday["High"].max()), 2)
-            day_low = round(float(df_intraday["Low"].min()), 2)
+            if df_intraday.index.tz is not None:
+                df_intraday.index = df_intraday.index.tz_localize(None)
+
+            # Calculate Day Elapsed Volume (from market open of the current session to latest candle)
+            latest_date = df_intraday.index[-1].normalize()
+            df_today = df_intraday[df_intraday.index.normalize() == latest_date]
+            day_elapsed_volume = int(df_today["Volume"].sum()) if not df_today.empty else int(df_intraday["Volume"].sum())
+
+            day_open = round(float(df_today.iloc[0]["Open"]) if not df_today.empty else float(df_intraday.iloc[0]["Open"]), 2)
+            day_high = round(float(df_today["High"].max()) if not df_today.empty else float(df_intraday["High"].max()), 2)
+            day_low = round(float(df_today["Low"].min()) if not df_today.empty else float(df_intraday["Low"].min()), 2)
             cmp = round(float(df_intraday.iloc[-1]["Close"]), 2)
             prev_close = (
                 round(float(ticker.fast_info.previous_close), 2)
@@ -233,7 +241,7 @@ def fetch_rolling_institutional_data(symbols):
                 if prev_close
                 else 0.0
             )
-            volume = int(df_intraday["Volume"].sum())
+            volume = day_elapsed_volume
 
             total_vol = df_intraday["Volume"].sum()
             vwap = (
@@ -252,10 +260,8 @@ def fetch_rolling_institutional_data(symbols):
             rolling_high = round(float(recent_candles["High"].max()), 2)
             rolling_low = round(float(recent_candles["Low"].min()), 2)
 
-            vol_ma = df_intraday["Volume"].rolling(window=2000).mean()
-            curr_candle_vol = float(df_intraday["Volume"].iloc[-1])
-            avg_vol_ma = float(vol_ma.iloc[-1]) if not vol_ma.empty and not pd.isna(vol_ma.iloc[-1]) else 0.0
-            exceptional_vol = curr_candle_vol > (avg_vol_ma * 10.0) if avg_vol_ma > 0 else (curr_candle_vol > 10000)
+            # Check volume for day elapsed instead of single candle
+            exceptional_vol = day_elapsed_volume >= 150000
 
             rsi_15m = compute_rsi(df_intraday["Close"], period=14)
             curr_rsi = float(rsi_15m.iloc[-1])
@@ -386,7 +392,7 @@ def process_rolling_confluence(
 
         if exceptional_vol:
             base_prob += 12.4
-            reasons.append("🔥 High Volume 15m Spike")
+            reasons.append("🔥 High Day Elapsed Volume")
 
         if is_bullish_breakout:
             if rsi_bull_div:
@@ -958,11 +964,15 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
             closest_row = df_hist.loc[df_hist['time_diff'].idxmin()]
             
             candle_time = closest_row.name.time()
-            candle_vol = float(closest_row["Volume"])
             candle_close = float(closest_row["Close"])
             candle_open = float(closest_row["Open"])
             
-            is_entry_allowed = candle_vol >= 20000 and candle_close >= 50.0
+            # Check cumulative day elapsed volume from market open up to backtest check time
+            df_session = df_hist[df_hist.index.normalize() == pd.Timestamp(target_date)]
+            df_elapsed = df_session[df_session.index <= closest_row.name]
+            day_elapsed_vol = float(df_elapsed["Volume"].sum()) if not df_elapsed.empty else float(closest_row["Volume"])
+
+            is_entry_allowed = day_elapsed_vol >= 100000 and candle_close >= 50.0
 
             if not is_entry_allowed:
                 if direction_filter != "All (Buy & Sell)" and not (
