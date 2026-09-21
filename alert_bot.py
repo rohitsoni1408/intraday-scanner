@@ -6,9 +6,11 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-# --- CONFIGURATION & CREDENTIALS ---
+# Fetch credentials securely from GitHub environment variables
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
+# File to persist sent alerts for the day and avoid duplicates
 ALERT_FILE = "sent_alerts.json"
 
 
@@ -41,7 +43,7 @@ def save_sent_alert(sym):
 
 def send_telegram_alert(message):
   if not TELEGRAM_TOKEN or not CHAT_ID:
-    print("Telegram token or chat ID missing in environment variables.")
+    print("Telegram token or chat ID missing.")
     return
   url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
   payload = {
@@ -51,319 +53,631 @@ def send_telegram_alert(message):
       "disable_web_page_preview": True,
   }
   try:
-    response = requests.post(url, json=payload, timeout=10)
+    response = requests.post(url, json=payload)
     if response.status_code != 200:
       print(f"Failed to send alert: {response.text}")
   except Exception as e:
     print(f"Error sending alert: {e}")
 
 
-def get_top_500_universe():
-  market_cap_tier_1 = [
-      "RELIANCE",
-      "TCS",
-      "HDFCBANK",
-      "ICICIBANK",
-      "INFY",
-      "BHARTIARTL",
-      "SBIN",
-      "LTIM",
-      "ITC",
-      "HINDUNILVR",
-      "LT",
-      "BAJFINANCE",
-      "AXISBANK",
-      "KOTAKBANK",
-      "MARUTI",
-      "SUNPHARMA",
-      "TITAN",
-      "ULTRACEMCO",
-      "NTPC",
-      "ONGC",
-      "POWERGRID",
-      "ASIANPAINT",
-      "ADANIENT",
-      "ADANIPORTS",
-      "COALINDIA",
-      "TATASTEEL",
-      "HINDALCO",
-      "GRASIM",
-      "TECHM",
-      "WIPRO",
-      "BAJAJFINSV",
-      "SBILIFE",
-      "HDFCLIFE",
-      "DIVISLAB",
-      "CIPLA",
-      "EICHERMOT",
-      "BPCL",
-      "TATAMOTORS",
-      "HEROMOTOCO",
-      "BRITANNIA",
-  ]
-  market_cap_tier_2 = [
-      "INDUSINDBK",
-      "JSWSTEEL",
-      "APOLLOHOSP",
-      "DRREDDY",
-      "SHRIRAMFIN",
-      "M&M",
-      "NESTLEIND",
-      "TATACONSUM",
-      "BAJAJ-AUTO",
-      "HCLTECH",
-      "SBICARD",
-      "PIDILITIND",
-      "SRF",
-      "ATGL",
-      "ADANIGREEN",
-      "ADANIPOWER",
-      "HAL",
-      "BEL",
-      "IOC",
-      "GAIL",
-      "ZOMATO",
-      "PAYTM",
-      "NYKAA",
-      "POLICYBZR",
-      "DELHIVERY",
-      "DMART",
-      "LUPIN",
-      "TORNTPHARM",
-      "CANBK",
-      "PNB",
-      "BANKBARODA",
-      "CHOLAFIN",
-      "MUTHOOTFIN",
-      "RECLTD",
-      "PFC",
-      "NHPC",
-      "SJVN",
-      "IRFC",
-      "RVNL",
-      "CONCOR",
-  ]
-  market_cap_tier_3 = [
-      "TRENT",
-      "ASHOKLEY",
-      "BOSCHLTD",
-      "INDIGO",
-      "NAUKRI",
-      "MCDOWELL-N",
-      "UPL",
-      "AMBUJACEM",
-      "ACC",
-      "PAGEIND",
-      "PERSISTENT",
-      "COFORGE",
-      "MPHASIS",
-      "LTTS",
-      "OFSS",
-      "POLYCAB",
-      "DIXON",
-      "ASTRAL",
-      "SUPREMEIND",
-      "BHARATFORG",
-      "ABFRL",
-      "JUBLFOOD",
-      "DEVYANI",
-      "BEML",
-      "CUMMINSIND",
-      "SIEMENS",
-      "ABB",
-      "SCHAEFFLER",
-      "THERMAX",
-      "VOLTAS",
-      "HAVELLS",
-      "WHIRLPOOL",
-      "CROMPTON",
-      "MANYAVAR",
-      "METROPOLIS",
-      "LALPATHLAB",
-      "SYNGENE",
-      "IPCALAB",
-      "GLENMARK",
-      "AIAENG",
-  ]
-  additional_pool = [
-      "IDFCFIRSTB",
-      "AUBANK",
-      "FEDERALBNK",
-      "BANDHANBNK",
-      "L&TFH",
-      "BIOCON",
-      "LAURUSLABS",
-      "GNFC",
-      "CHAMBLFERT",
-      "COROMANDEL",
-      "DEEPAKNTR",
-      "NAVINFLUOR",
-      "ATUL",
-      "PIIND",
-      "AARTIIND",
-      "BSOFT",
-      "ZENSARTECH",
-      "CYIENT",
-      "KPITTECH",
-      "SONACOMS",
-      "ENDURANCE",
-      "MOTHERSON",
-      "UNOMINDA",
-      "BALKRISIND",
-      "JKCEMENT",
-      "RAMCOCEM",
-      "DALBHARAT",
-      "ABCAPITAL",
-      "HDFCAMC",
-      "CAMS",
-      "IEX",
-      "MCX",
-      "JSL",
-      "APLAPOLLO",
-      "MAZDOCK",
-      "COCHINSHIP",
-      "BDL",
-      "SOLARINDS",
-      "JINDALSTEL",
-      "NMDC",
-      "HINDZINC",
-      "VEDL",
-      "HINDCOPPER",
-      "IGL",
-      "MGL",
-      "PETRONET",
-      "OIL",
-      "MRPL",
-  ]
-  generic_fillers = [f"STK{i}" for i in range(1, 300)]
-  combined = (
-      market_cap_tier_1
-      + market_cap_tier_2
-      + market_cap_tier_3
-      + additional_pool
-      + generic_fillers
-  )
-  unique_pool = list(dict.fromkeys(combined))[:500]
-  return [f"{sym}.NS" for sym in unique_pool if not sym.startswith("STK")]
-
-
 def process_symbol(sym):
   try:
+    # Fetching live intraday 5-minute data dynamically
     ticker = yf.Ticker(sym)
-    df = ticker.history(period="1d", interval="5m")
-    if df.empty or len(df) < 5:
+    df = ticker.history(period="2d", interval="5m")
+    if df.empty or len(df) < 15:
       return None
 
-    if df.index.tz is not None:
-      df.index = df.index.tz_convert("Asia/Kolkata")
-      df.index = df.index.tz_localize(None)
-
-    today_str = get_today_date()
-    df_today = df[df.index.strftime("%Y-%m-%d") == today_str]
-    if len(df_today) < 5:
-      df_today = df.tail(30)
-
-    if len(df_today) < 8:
-      return None
-
+    # Check the last 3 candles (-3, -2, -1) to cover a full 15-minute window
+    # even if the cron job runs every 15 minutes.
     for index_offset in [-3, -2, -1]:
-      if abs(index_offset) > len(df_today):
-        continue
-      candle = df_today.iloc[index_offset]
-      historical_df = df_today.iloc[: len(df_today) + index_offset]
-      if len(historical_df) < 5:
+      candle = df.iloc[index_offset]
+
+      # Slice historical data up to that specific candle's position
+      historical_df = df.iloc[: len(df) + index_offset]
+      if len(historical_df) < 10:
         continue
 
       cmp = round(float(candle["Close"]), 2)
-      day_open = round(float(df_today.iloc[0]["Open"]), 2)
-      prev_high = round(float(historical_df["High"].tail(8).max()), 2)
+      prev_high = round(float(historical_df["High"].tail(10).max()), 2)
       recent_low = round(float(historical_df["Low"].tail(5).min()), 2)
 
+      # Institutional Volume Filter Calculation
       current_vol = float(candle["Volume"])
       avg_vol = float(historical_df["Volume"].tail(10).mean())
-      is_volume_surge = (
-          avg_vol > 0
-          and (current_vol >= (1.8 * avg_vol))
-          and current_vol > 25000
-      )
 
-      cum_vol = historical_df["Volume"].sum() + current_vol
-      cum_pv = (historical_df["Close"] * historical_df["Volume"]).sum() + (
-          cmp * current_vol
-      )
-      vwap = round(cum_pv / cum_vol, 2) if cum_vol > 0 else cmp
+      # Condition: Price breakout AND volume is at least 2x the 10-period average volume
+      is_volume_surge = avg_vol > 0 and (current_vol >= (2.0 * avg_vol))
 
-      pct_from_open = ((cmp - day_open) / day_open) * 100
-      has_space = (
-          (cmp > prev_high)
-          and (cmp > vwap)
-          and (cmp > day_open)
-          and (0.3 <= pct_from_open <= 5.0)
-      )
-
-      if has_space and is_volume_surge:
-        clean_sym = sym.replace(".NS", "")
+      if cmp > prev_high and is_volume_surge:
+        # Check if alert was already sent today for this symbol
         sent_symbols = load_sent_alerts()
-        if clean_sym in sent_symbols:
+        if sym in sent_symbols:
           return None
 
+        # Dynamic Risk Management Levels based on live price action
         entry_price = cmp
         stop_loss = (
             recent_low
             if recent_low < entry_price
-            else round(entry_price * 0.992, 2)
+            else round(entry_price * 0.99, 2)
         )
         risk = entry_price - stop_loss
-        if risk <= 0:
-          stop_loss = round(entry_price * 0.992, 2)
-          risk = entry_price - stop_loss
-
-        target = round(entry_price + (risk * 2), 2)
+        target = round(entry_price + (risk * 2), 2)  # 1:2 Risk-to-Reward ratio
         vol_multiplier = round(current_vol / avg_vol, 1)
-        chart_url = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+
+        # Clean symbol name for TradingView link (e.g., RELIANCE.NS -> NSE:RELIANCE)
+        tv_symbol = sym.replace(".NS", "")
+        chart_url = f"https://www.tradingview.com/chart/?symbol=NSE:{tv_symbol}"
 
         msg = (
-            f"🚨 *Institutional Breakout Alert*\n\n"
-            f"📌 *Stock:* `{clean_sym}`\n"
+            f"🚨 *RS1408 Institutional Breakout Alert*\n\n"
+            f"📌 *Stock:* `{sym}`\n"
             f"💰 *Entry Price:* `₹{entry_price}`\n"
             f"🛑 *Stop Loss (SL):* `₹{stop_loss}`\n"
             f"🎯 *Target (1:2):* `₹{target}`\n"
-            f"📦 *Volume Surge:* `{vol_multiplier}x` average\n"
-            f"🚀 *Space & VWAP Confluence Confirmed*\n\n"
+            f"📦 *Volume Surge:* `{vol_multiplier}x` average\n\n"
             f"📊 [View Live Chart]({chart_url})"
         )
 
         send_telegram_alert(msg)
-        save_sent_alert(clean_sym)
-        return clean_sym
-  except Exception:
+        save_sent_alert(sym)
+        return sym
+  except Exception as e:
     pass
   return None
 
 
 def check_market():
-  now = datetime.now()
-  if now.weekday() >= 5:
-    print("Market is closed (Weekend).")
-    return
+  # Comprehensive watchlist of NSE stock symbols embedded directly
+  symbols = [
+      "RELIANCE.NS",
+      "TCS.NS",
+      "HDFCBANK.NS",
+      "ICICIBANK.NS",
+      "SBIN.NS",
+      "BHARTIARTL.NS",
+      "ITC.NS",
+      "KOTAKBANK.NS",
+      "LT.NS",
+      "AXISBANK.NS",
+      "HINDUNILVR.NS",
+      "BAJFINANCE.NS",
+      "MARUTI.NS",
+      "SUNPHARMA.NS",
+      "TITAN.NS",
+      "ULTRACEMCO.NS",
+      "NTPC.NS",
+      "ONGC.NS",
+      "POWERGRID.NS",
+      "TATASTEEL.NS",
+      "JSWSTEEL.NS",
+      "COALINDIA.NS",
+      "M&M.NS",
+      "HCLTECH.NS",
+      "ADANIENT.NS",
+      "ADANIPORTS.NS",
+      "ASIANPAINT.NS",
+      "BAJAJFINSV.NS",
+      "GRASIM.NS",
+      "SBILIFE.NS",
+      "BPCL.NS",
+      "HINDALCO.NS",
+      "BRITANNIA.NS",
+      "DIVISLAB.NS",
+      "CIPLA.NS",
+      "EICHERMOT.NS",
+      "DRREDDY.NS",
+      "APOLLOHOSP.NS",
+      "TATACONSUM.NS",
+      "SBICARD.NS",
+      "PIDILITIND.NS",
+      "SIEMENS.NS",
+      "SRF.NS",
+      "HEROMOTOCO.NS",
+      "SHREECEM.NS",
+      "ADANIGREEN.NS",
+      "ADANIPOWER.NS",
+      "ATGL.NS",
+      "INDUSINDBK.NS",
+      "TECHM.NS",
+      "WIPRO.NS",
+      "DMART.NS",
+      "HAL.NS",
+      "BEL.NS",
+      "IRCTC.NS",
+      "VBL.NS",
+      "CHOLAFIN.NS",
+      "TVSMOTOR.NS",
+      "TATAPOWER.NS",
+      "INDIGO.NS",
+      "IOC.NS",
+      "TORNTPHARM.NS",
+      "MOTHERSON.NS",
+      "SOLARINDS.NS",
+      "DLF.NS",
+      "ICICIAMC.NS",
+      "ABB.NS",
+      "ACC.NS",
+      "AIAENG.NS",
+      "APLAPOLLO.NS",
+      "AUBANK.NS",
+      "AWL.NS",
+      "AADHARHFC.NS",
+      "AARTIIND.NS",
+      "AAVAS.NS",
+      "ABBOTINDIA.NS",
+      "ACE.NS",
+      "ADANIENSOL.NS",
+      "ABCAPITAL.NS",
+      "ABFRL.NS",
+      "ABREL.NS",
+      "ABSLAMC.NS",
+      "AEGISLOG.NS",
+      "AFFLE.NS",
+      "AJANTPHARM.NS",
+      "ALKEM.NS",
+      "ARE&M.NS",
+      "AMBER.NS",
+      "AMBUJACEM.NS",
+      "ANANDRATHI.NS",
+      "ANANTRAJ.NS",
+      "ANGELONE.NS",
+      "ANURAS.NS",
+      "APARINDS.NS",
+      "APOLLOTYRE.NS",
+      "APTUS.NS",
+      "ASAHIINDIA.NS",
+      "ASHOKLEY.NS",
+      "ASTERDM.NS",
+      "ASTRAL.NS",
+      "ATUL.NS",
+      "AUROPHARMA.NS",
+      "AIIL.NS",
+      "BEML.NS",
+      "BLS.NS",
+      "BSE.NS",
+      "BAJAJ-AUTO.NS",
+      "BANKBARODA.NS",
+      "BANKINDIA.NS",
+      "BATAINDIA.NS",
+      "BAYERCROP.NS",
+      "BDL.NS",
+      "BHARATFORG.NS",
+      "BHEL.NS",
+      "BIOCON.NS",
+      "BIRLACORPN.NS",
+      "BSOFT.NS",
+      "CANBK.NS",
+      "CANFINHOME.NS",
+      "CARBORUNIV.NS",
+      "CASTROLIND.NS",
+      "CEATLTD.NS",
+      "CENTURYTEX.NS",
+      "CERA.NS",
+      "CHAMBLFERT.NS",
+      "CHEMPLASTS.NS",
+      "CIEINDIA.NS",
+      "CUB.NS",
+      "CLEAN.NS",
+      "COFORGE.NS",
+      "COLPAL.NS",
+      "CONCOR.NS",
+      "COROMANDEL.NS",
+      "CRAFTSMAN.NS",
+      "CREDITACC.NS",
+      "CROMPTON.NS",
+      "CUMMINSIND.NS",
+      "CYIENT.NS",
+      "DCMSHRIRAM.NS",
+      "DEEPAKFERT.NS",
+      "DEEPAKNTR.NS",
+      "DELHIVERY.NS",
+      "DEVYANI.NS",
+      "DIXON.NS",
+      "LALPATHLAB.NS",
+      "EIDPARRY.NS",
+      "ELGIEQUIP.NS",
+      "EMAMILTD.NS",
+      "ENDURANCE.NS",
+      "ESCORTS.NS",
+      "EXIDEIND.NS",
+      "FSL.NS",
+      "FEDERALBNK.NS",
+      "FINEORG.NS",
+      "FLUOROCHEM.NS",
+      "FORTIS.NS",
+      "GAIL.NS",
+      "GESHIP.NS",
+      "GICRE.NS",
+      "GILLETTE.NS",
+      "GLAXO.NS",
+      "GLENMARK.NS",
+      "MEDANTA.NS",
+      "GODREJAGRO.NS",
+      "GODREJCP.NS",
+      "GODREJPROP.NS",
+      "GPPL.NS",
+      "GRANULES.NS",
+      "GRAPHITE.NS",
+      "GRINDWELL.NS",
+      "GSFC.NS",
+      "GSPL.NS",
+      "GUJGASLTD.NS",
+      "GNFC.NS",
+      "HEG.NS",
+      "HEMIPROP.NS",
+      "HIKAL.NS",
+      "HINDCOPPER.NS",
+      "HINDPETRO.NS",
+      "HINDZINC.NS",
+      "HOMEFIRST.NS",
+      "HONAUT.NS",
+      "HUDCO.NS",
+      "IDBI.NS",
+      "IDFCFIRSTB.NS",
+      "IEX.NS",
+      "IFBIND.NS",
+      "IIFL.NS",
+      "IMFA.NS",
+      "IPCALAB.NS",
+      "IRB.NS",
+      "IRCON.NS",
+      "ITI.NS",
+      "JBCHEPHARM.NS",
+      "JKCEMENT.NS",
+      "JKPAPER.NS",
+      "JSL.NS",
+      "JINDALSTEL.NS",
+      "JMFINANCIL.NS",
+      "JUBLFOOD.NS",
+      "JUBLINGREA.NS",
+      "JUSTDIAL.NS",
+      "JYOTHYLAB.NS",
+      "KAJARIACER.NS",
+      "KALYANKJIL.NS",
+      "KANSAINER.NS",
+      "KARURVYSYA.NS",
+      "KEC.NS",
+      "KPITTECH.NS",
+      "KPRMILL.NS",
+      "KSB.NS",
+      "L&TFH.NS",
+      "LTTS.NS",
+      "LICHSGFIN.NS",
+      "LINDEINDIA.NS",
+      "LUPIN.NS",
+      "MMTC.NS",
+      "MOIL.NS",
+      "MRF.NS",
+      "LODHA.NS",
+      "MGL.NS",
+      "MINDACORP.NS",
+      "MPHASIS.NS",
+      "MRPL.NS",
+      "MTARTECH.NS",
+      "MUTHOOTFIN.NS",
+      "NATCOPHARM.NS",
+      "NATIONALUM.NS",
+      "NAVINFLUOR.NS",
+      "NAUKRI.NS",
+      "NBCC.NS",
+      "NCC.NS",
+      "NESCO.NS",
+      "NH.NS",
+      "NLCINDIA.NS",
+      "NMDC.NS",
+      "NOCIL.NS",
+      "OBEROIRLTY.NS",
+      "OFSS.NS",
+      "OIL.NS",
+      "OLECTRA.NS",
+      "PAGEIND.NS",
+      "PERSISTENT.NS",
+      "PETRONET.NS",
+      "PFIZER.NS",
+      "PHOENIXLTD.NS",
+      "PIIND.NS",
+      "PNB.NS",
+      "PNCINFRA.NS",
+      "POONAWALLA.NS",
+      "PRAJIND.NS",
+      "PRESTIGE.NS",
+      "PRINCEPIPE.NS",
+      "PVRINOX.NS",
+      "QUESS.NS",
+      "RBLBANK.NS",
+      "RECLTD.NS",
+      "RENUKA.NS",
+      "RITES.NS",
+      "RKFORGE.NS",
+      "ROSSARI.NS",
+      "ROUTE.NS",
+      "RPOWER.NS",
+      "RVNL.NS",
+      "SANOFI.NS",
+      "SAPPHIRE.NS",
+      "SFL.NS",
+      "SHARDACROP.NS",
+      "SHILPAMED.NS",
+      "SONACOMS.NS",
+      "SPANDANA.NS",
+      "STAR.NS",
+      "STLTECH.NS",
+      "SUDARSCHEM.NS",
+      "SUMICHEM.NS",
+      "SUNDARMFIN.NS",
+      "SUNDRMFAST.NS",
+      "SUPRAJIT.NS",
+      "SUPREMEIND.NS",
+      "SUZLON.NS",
+      "SWANENERGY.NS",
+      "SYNGENE.NS",
+      "TATAELXSI.NS",
+      "TATAMTRDVR.NS",
+      "TEAMLEASE.NS",
+      "TECHNOE.NS",
+      "TEJASNET.NS",
+      "THYROCARE.NS",
+      "TIMKEN.NS",
+      "TRENT.NS",
+      "TRIDENT.NS",
+      "TRITURBINE.NS",
+      "UCOBANK.NS",
+      "UJJIVANSFB.NS",
+      "UMANGDAIRY.NS",
+      "UNICHEMLAB.NS",
+      "UNIONBANK.NS",
+      "UPL.NS",
+      "VAIBHAVGEMS.NS",
+      "VARDHACRLC.NS",
+      "VARROC.NS",
+      "VTL.NS",
+      "WELCORP.NS",
+      "WELSPUNLIV.NS",
+      "WESTLIFE.NS",
+      "WHIRLPOOL.NS",
+      "WOCKPHARD.NS",
+      "YESBANK.NS",
+      "ZFCVINDIA.NS",
+      "ZYDUSLIFE.NS",
+      "ZYDUSWELL.NS",
+      "AARTIPHARM.NS",
+      "ABSL.NS",
+      "AGI.NS",
+      "AKZOINDIA.NS",
+      "ALEMBICLTD.NS",
+      "AMARAJABAT.NS",
+      "ANUP.NS",
+      "APEX.NS",
+      "ARVIND.NS",
+      "ASALCBR.NS",
+      "ATFL.NS",
+      "AVADHSUGAR.NS",
+      "BAGFILMS.NS",
+      "BALAMINES.NS",
+      "BALRAMCHIN.NS",
+      "BANCOINDIA.NS",
+      "BANSWRAS.NS",
+      "BARBEQUE.NS",
+      "BASF.NS",
+      "BECTORFOOD.NS",
+      "BEPL.NS",
+      "BHARATWIRE.NS",
+      "BIGBLOC.NS",
+      "BIRLACABLE.NS",
+      "BLUEDART.NS",
+      "BLUESTARCO.NS",
+      "BORORENEW.NS",
+      "BPL.NS",
+      "BRIGADE.NS",
+      "BURGERKING.NS",
+      "CAMLINFINE.NS",
+      "CAPLIPOINT.NS",
+      "CARERATING.NS",
+      "CCL.NS",
+      "CENTENK.NS",
+      "CENTRALBK.NS",
+      "CHEMCON.NS",
+      "CIGNITITEC.NS",
+      "COSMOFILMS.NS",
+      "CREDITACCESS.NS",
+      "CSBBANK.NS",
+      "DBCORP.NS",
+      "DBL.NS",
+      "DCW.NS",
+      "DELTACORP.NS",
+      "DHANI.NS",
+      "DIAMONDYD.NS",
+      "DODLA.NS",
+      "DREAMFOLKS.NS",
+      "EASEMYTRIP.NS",
+      "EDELWEISS.NS",
+      "EIHAHOTELS.NS",
+      "EMAMIPAP.NS",
+      "ENIL.NS",
+      "EQUITASBNK.NS",
+      "ERIS.NS",
+      "ESABINDIA.NS",
+      "EXCEL.NS",
+      "FAIRCHEM.NS",
+      "FCL.NS",
+      "FDC.NS",
+      "FIVESTAR.NS",
+      "FLAIR.NS",
+      "GENESYS.NS",
+      "GFLLIMITED.NS",
+      "GICHSGFIN.NS",
+      "GKWLIMITED.NS",
+      "GLOBALVECT.NS",
+      "GLS.NS",
+      "GMDC.NS",
+      "GMRINFRA.NS",
+      "GOCOLORS.NS",
+      "GODREJIND.NS",
+      "GOKEX.NS",
+      "GPIL.NS",
+      "GPTINFRA.NS",
+      "GREAVESCOT.NS",
+      "GREENPANEL.NS",
+      "GREENPLY.NS",
+      "GRINFRA.NS",
+      "GTPL.NS",
+      "GUJALKALI.NS",
+      "GULFOILLUB.NS",
+      "HAPPSTMNDS.NS",
+      "HATHWAY.NS",
+      "HCG.NS",
+      "HIL.NS",
+      "HIMATSEIDE.NS",
+      "HITECH.NS",
+      "HLVLTD.NS",
+      "HMT.NS",
+      "HSCL.NS",
+      "HTMEDIA.NS",
+      "IBULHSGFIN.NS",
+      "ICIL.NS",
+      "ICRA.NS",
+      "IDFC.NS",
+      "IGL.NS",
+      "IIFLSEC.NS",
+      "INDOCO.NS",
+      "INDSWFTLAB.NS",
+      "INEOSSTYRO.NS",
+      "INNOVACAP.NS",
+      "INOXWIND.NS",
+      "INSECTICID.NS",
+      "INTELLECT.NS",
+      "IOB.NS",
+      "ISGEC.NS",
+      "ITDC.NS",
+      "JAGRAN.NS",
+      "JAIBALAJI.NS",
+      "JAMNAAUTO.NS",
+      "JAYAGROAL.NS",
+      "JAYNECOIND.NS",
+      "JETFREIGHT.NS",
+      "JINDALSAW.NS",
+      "JISLJALEQS.NS",
+      "JKIL.NS",
+      "JTEKTINDIA.NS",
+      "KABRAEXTRU.NS",
+      "KALPATPOWR.NS",
+      "KALYANI.NS",
+      "KAMDHENU.NS",
+      "KANPRPLA.NS",
+      "KCP.NS",
+      "KCPSUGAR.NS",
+      "KILITCH.NS",
+      "KIRLOSBROS.NS",
+      "KIRLOSFER.NS",
+      "KIRLOSIND.NS",
+      "KNRCON.NS",
+      "KOLTEPATIL.NS",
+      "KOPRAN.NS",
+      "KSE.NS",
+      "KUANTUM.NS",
+      "LASA.NS",
+      "LAURUSLABS.NS",
+      "LEMONTREE.NS",
+      "LGBBROSLTD.NS",
+      "LOVABLE.NS",
+      "LOYALTEXT.NS",
+      "M&MFIN.NS",
+      "MAANALU.NS",
+      "MACPOWER.NS",
+      "MADHUCON.NS",
+      "MAHASTEEL.NS",
+      "MAHSEAMLES.NS",
+      "MAITHANALL.NS",
+      "MANINFRA.NS",
+      "MANORAMA.NS",
+      "MAPMYINDIA.NS",
+      "MARKSANS.NS",
+      "MASFIN.NS",
+      "MASTEK.NS",
+      "MAXHEALTH.NS",
+      "MAYURUNIQ.NS",
+      "MBLINFRA.NS",
+      "MENONBEAR.NS",
+      "MHRIL.NS",
+      "MIDHANI.NS",
+      "MINDTECK.NS",
+      "MIRZAINT.NS",
+      "MITCON.NS",
+      "MODISONLTD.NS",
+      "MOHITIND.NS",
+      "MOLDTKPAC.NS",
+      "MONARCH.NS",
+      "MOREPENLAB.NS",
+      "MOTILALOFS.NS",
+      "MPSLTD.NS",
+      "MSTCLTD.NS",
+      "MUKANDLTD.NS",
+      "MUKTAARTS.NS",
+      "MUNJALAU.NS",
+      "MURUDCERA.NS",
+      "MUTHOOTCAP.NS",
+      "NACLIND.NS",
+      "NAGAAGRI.NS",
+      "NAGARFERT.NS",
+      "NAHARSPING.NS",
+      "NAM-INDIA.NS",
+      "NCLIND.NS",
+      "NDGL.NS",
+      "NDL.NS",
+      "NDTV.NS",
+      "NECCLTD.NS",
+      "NELCAST.NS",
+      "NELCO.NS",
+      "NESCO.NS",
+      "NEULANDLAB.NS",
+      "NEWGEN.NS",
+      "NILKAMAL.NS",
+      "NITINSPIN.NS",
+      "NKIND.NS",
+      "NOCIL.NS",
+      "NYKAA.NS",
+      "OAL.NS",
+      "OBEROIRLTY.NS",
+      "OCCL.NS",
+      "OMAXE.NS",
+      "OMINFRA.NS",
+      "ONMOBILE.NS",
+      "ORCHPHARMA.NS",
+      "ORIENTBELL.NS",
+      "ORIENTCEM.NS",
+      "ORIENTELEC.NS",
+      "ORIENTPPR.NS",
+      "ORTINLAB.NS",
+      "PAISALO.NS",
+      "PALASHSECU.NS",
+      "PANACEABIO.NS",
+      "PANACHE.NS",
+      "PARACABLES.NS",
+      "PARAGMILK.NS",
+      "PARAS.NS",
+      "PARKHOTELS.NS",
+      "PASHUPATI.NS",
+      "PATELENG.NS",
+      "PATANJALI.NS",
+      "PCJEWELLER.NS",
+  ]
 
-  symbols = get_top_500_universe()
   print(
-      "Starting parallel intraday institutional scan for top"
-      f" {len(symbols)} market-cap stocks..."
+      "Starting parallel intraday institutional scan for"
+      f" {len(symbols)} stocks..."
   )
 
   alert_triggered = False
-  with ThreadPoolExecutor(max_workers=25) as executor:
+  with ThreadPoolExecutor(max_workers=20) as executor:
     futures = {executor.submit(process_symbol, sym): sym for sym in symbols}
     for future in as_completed(futures):
       if future.result():
         alert_triggered = True
 
   if not alert_triggered:
-    print(
-        "Scan completed silently: No intraday institutional breakouts matched."
-    )
+    print("Scan completed silently: No institutional volume breakouts matched.")
 
 
 if __name__ == "__main__":
