@@ -1,4 +1,3 @@
-import datetime
 from datetime import datetime, time, timedelta
 from bs4 import BeautifulSoup
 import numpy as np
@@ -235,10 +234,12 @@ def compute_rsi(series, period=14):
   return 100 - (100 / (1 + rs))
 
 
-# --- ROLLING INSTITUTIONAL DATA FETCHERS (INTRADAY ONLY) ---
+# --- ROLLING INSTITUTIONAL DATA FETCHERS (INTRADAY SESSION SCAN) ---
 @st.cache_data(ttl=15)
 def fetch_rolling_institutional_data(symbols):
   data_dict = {}
+  today_str = datetime.now().strftime("%Y-%m-%d")
+
   for sym in symbols:
     clean_sym = sym.upper().strip()
     if clean_sym.startswith("STOCK"):
@@ -253,10 +254,22 @@ def fetch_rolling_institutional_data(symbols):
       if df_intraday.index.tz is not None:
         df_intraday.index = df_intraday.index.tz_localize(None)
 
-      day_open = round(float(df_intraday.iloc[0]["Open"]), 2)
-      day_high = round(float(df_intraday["High"].max()), 2)
-      day_low = round(float(df_intraday["Low"].min()), 2)
-      cmp = round(float(df_intraday.iloc[-1]["Close"]), 2)
+      # Filter explicitly for today's session from market open (9:15 AM) onwards to avoid noise
+      df_today = df_intraday[df_intraday.index.strftime("%Y-%m-%d") == today_str]
+      if len(df_today) < 5:
+        df_today = df_intraday.tail(30)
+
+      if len(df_today) < 8:
+        continue
+
+      # Evaluate completed candles or active session window dynamically without noise
+      candle = df_today.iloc[-1]
+      historical_df = df_today.iloc[:-1]
+
+      cmp = round(float(candle["Close"]), 2)
+      day_open = round(float(df_today.iloc[0]["Open"]), 2)
+      day_high = round(float(df_today["High"].max()), 2)
+      day_low = round(float(df_today["Low"].min()), 2)
       prev_close = (
           round(float(ticker.fast_info.previous_close), 2)
           if ticker.fast_info.previous_close
@@ -267,14 +280,13 @@ def fetch_rolling_institutional_data(symbols):
           if prev_close
           else 0.0
       )
-      volume = int(df_intraday["Volume"].sum())
+      volume = int(df_today["Volume"].sum())
 
-      total_vol = df_intraday["Volume"].sum()
+      total_vol = df_today["Volume"].sum()
       vwap = (
           round(
               float(
-                  (df_intraday["Close"] * df_intraday["Volume"]).sum()
-                  / total_vol
+                  (df_today["Close"] * df_today["Volume"]).sum() / total_vol
               ),
               2,
           )
@@ -282,22 +294,25 @@ def fetch_rolling_institutional_data(symbols):
           else cmp
       )
 
-      recent_candles = df_intraday.iloc[:-1].tail(10)
+      recent_candles = df_today.tail(10)
       rolling_high = round(float(recent_candles["High"].max()), 2)
       rolling_low = round(float(recent_candles["Low"].min()), 2)
 
-      vol_ma = df_intraday["Volume"].rolling(window=10).mean()
-      curr_candle_vol = float(df_intraday["Volume"].iloc[-1])
+      vol_ma = df_today["Volume"].rolling(window=10).mean()
+      curr_candle_vol = float(candle["Volume"])
       avg_vol_ma = (
           float(vol_ma.iloc[-1])
           if not vol_ma.empty and not pd.isna(vol_ma.iloc[-1])
           else 0.0
       )
       exceptional_vol = (
-          curr_candle_vol > (avg_vol_ma * 1.6) if avg_vol_ma > 0 else False
+          curr_candle_vol >= (1.8 * avg_vol_ma)
+          if avg_vol_ma > 0
+          and curr_candle_vol > 25000
+          else (curr_candle_vol > 35000)
       )
 
-      rsi_5m = compute_rsi(df_intraday["Close"], period=14)
+      rsi_5m = compute_rsi(df_today["Close"], period=14)
       curr_rsi = float(rsi_5m.iloc[-1]) if len(rsi_5m) > 0 else 50.0
 
       data_dict[clean_sym] = {
@@ -409,23 +424,22 @@ def process_rolling_confluence(
     if cmp < 50.0:
       continue
 
-    # Space for movement w.r.t institutional buy/sell:
-    # Requires breakout with clean headroom from open and VWAP alignment
+    # Space for movement w.r.t institutional buy/sell (Filtered for noise reduction)
     pct_from_open = ((cmp - day_open) / day_open) * 100
     has_space_buy = (
-        (cmp > rolling_high)
+        (cmp >= rolling_high)
         and (cmp > vwap)
         and (cmp > day_open)
-        and (0.4 <= pct_from_open <= 4.5)
+        and (0.3 <= pct_from_open <= 5.0)
     )
     has_space_sell = (
-        (cmp < rolling_low)
+        (cmp <= rolling_low)
         and (cmp < vwap)
         and (cmp < day_open)
-        and (-4.5 <= pct_from_open <= -0.4)
+        and (-5.0 <= pct_from_open <= -0.3)
     )
 
-    base_prob = 63.0
+    base_prob = 65.0
     reasons = []
 
     if exceptional_vol and has_space_buy:
@@ -439,8 +453,8 @@ def process_rolling_confluence(
       if risk <= 0:
         sl = round(entry_price * 0.992, 2)
         risk = entry_price - sl
-      t1 = round(entry_price + (risk * 1.5), 2)
-      t2 = round(entry_price + (risk * 3.0), 2)
+      t1 = round(entry_price + (risk * 2.0), 2)
+      t2 = round(entry_price + (risk * 3.5), 2)
       chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
       score = win_prob + (pct_change * 2)
 
@@ -477,8 +491,8 @@ def process_rolling_confluence(
       if risk <= 0:
         sl = round(entry_price * 1.008, 2)
         risk = sl - entry_price
-      t1 = round(entry_price - (risk * 1.5), 2)
-      t2 = round(entry_price - (risk * 3.0), 2)
+      t1 = round(entry_price - (risk * 2.0), 2)
+      t2 = round(entry_price - (risk * 3.5), 2)
       chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
       score = win_prob + (abs(pct_change) * 2)
 
@@ -561,7 +575,7 @@ def run_live_backtest(
       candle_close = float(closest_row["Close"])
       candle_open = float(closest_row["Open"])
 
-      is_entry_allowed = candle_vol >= 20000 and candle_close >= 50.0
+      is_entry_allowed = candle_vol >= 25000 and candle_close >= 50.0
 
       if not is_entry_allowed:
         if direction_filter != "All (Buy & Sell)" and not (
