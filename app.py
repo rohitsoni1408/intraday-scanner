@@ -42,7 +42,6 @@ def is_market_closed():
     try:
         now = datetime.now(ZoneInfo("Asia/Kolkata"))
     except Exception:
-        # Fallback to UTC offset for IST (+5:30) if zoneinfo fails
         from datetime import timezone
         IST = timezone(timedelta(hours=5, minutes=30))
         now = datetime.now(IST)
@@ -123,7 +122,22 @@ def load_nifty_market_cap_universe():
 
 
 NIFTY_750_POOL = load_nifty_market_cap_universe()
-DEFAULT_SCAN_CLAUSE = "( {cash} ( [0] 15 minute close > [0] 15 minute vwap and [0] 15 minute volume > 100000 and [0] 15 minute close > 50 ) )"
+
+# --- UPDATED CHARTLINK SCAN CLAUSE BASED ON PROVIDED IMAGE ---
+DEFAULT_SCAN_CLAUSE = (
+    "( {cash} ( "
+    "[ -1 ] 15 minute volume > [ -1 ] 15 minute sma ( volume , 2000 ) * 10 and "
+    "[ -1 ] 15 minute high >= [ -2 ] 15 minute high and "
+    "[ -1 ] 15 minute high >= [ -3 ] 15 minute high and "
+    "[ -1 ] 15 minute high >= [ -4 ] 15 minute high and "
+    "[ -1 ] 15 minute low <= [ -2 ] 15 minute low and "
+    "[ -1 ] 15 minute low <= [ -3 ] 15 minute low and "
+    "[ -1 ] 15 minute low <= [ -4 ] 15 minute low and "
+    "daily volume >= 30000 and "
+    "daily % change >= 0 and "
+    "[ -1 ] 15 minute % change <= 4 "
+    ") )"
+)
 
 
 # --- TECHNICAL INDICATORS & CONFLUENCE TOOLS ---
@@ -200,7 +214,7 @@ def fetch_rolling_institutional_data(symbols):
         ticker_sym = f"{clean_sym}.NS"
         try:
             ticker = yf.Ticker(ticker_sym)
-            df_intraday = ticker.history(period="2d", interval="5m")
+            df_intraday = ticker.history(period="2d", interval="15m") # Updated to 15m matching chartlink timeframe
             if df_intraday.empty or len(df_intraday) < 15:
                 continue
 
@@ -237,14 +251,14 @@ def fetch_rolling_institutional_data(symbols):
             rolling_high = round(float(recent_candles["High"].max()), 2)
             rolling_low = round(float(recent_candles["Low"].min()), 2)
 
-            vol_ma = df_intraday["Volume"].rolling(window=20).mean()
+            vol_ma = df_intraday["Volume"].rolling(window=2000).mean() # Updated to match chartlink sma volume 2000
             curr_candle_vol = float(df_intraday["Volume"].iloc[-1])
             avg_vol_ma = float(vol_ma.iloc[-1]) if not vol_ma.empty and not pd.isna(vol_ma.iloc[-1]) else 0.0
-            exceptional_vol = curr_candle_vol > (avg_vol_ma * 1.5) if avg_vol_ma > 0 else False
+            exceptional_vol = curr_candle_vol > (avg_vol_ma * 10.0) if avg_vol_ma > 0 else (curr_candle_vol > 100000)
 
-            rsi_5m = compute_rsi(df_intraday["Close"], period=14)
-            curr_rsi = float(rsi_5m.iloc[-1])
-            prev_rsi = float(rsi_5m.iloc[-6])
+            rsi_15m = compute_rsi(df_intraday["Close"], period=14)
+            curr_rsi = float(rsi_15m.iloc[-1])
+            prev_rsi = float(rsi_15m.iloc[-6])
             curr_price = float(df_intraday["Low"].iloc[-1])
             prev_price = float(df_intraday["Low"].iloc[-6])
 
@@ -371,13 +385,13 @@ def process_rolling_confluence(
 
         if exceptional_vol:
             base_prob += 12.4
-            reasons.append("🔥 High Volume Institutional Spike")
+            reasons.append("🔥 High Volume 15m Spike")
 
         if is_bullish_breakout:
             if rsi_bull_div:
                 base_prob += 9.2
-                reasons.append("5m RSI Divergence")
-            if 0.8 <= pct_change <= 4.0:
+                reasons.append("15m RSI Divergence")
+            if 0.0 <= pct_change <= 4.0:
                 base_prob += 4.5
                 reasons.append("Active Momentum")
 
@@ -392,9 +406,9 @@ def process_rolling_confluence(
 
             buy_list.append({
                 "Symbol": symbol,
-                "Signal": "BUY (Institutional Breakout)",
+                "Signal": "BUY (Chartlink Pattern Match)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Confluence Reasons": ", ".join(reasons) if reasons else "Rolling Breakout + VWAP",
+                "Confluence Reasons": ", ".join(reasons) if reasons else "15m Range Compression Breakout",
                 "Rolling High (₹)": f"₹{rolling_high}",
                 "Rolling Low (₹)": f"₹{rolling_low}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
@@ -413,8 +427,8 @@ def process_rolling_confluence(
         elif is_bearish_breakout:
             if rsi_bear_div:
                 base_prob += 9.2
-                reasons.append("5m RSI Divergence")
-            if -4.0 <= pct_change <= -0.8:
+                reasons.append("15m RSI Divergence")
+            if -4.0 <= pct_change <= 0.0:
                 base_prob += 4.5
                 reasons.append("Heavy Selling Pressure")
 
@@ -429,9 +443,9 @@ def process_rolling_confluence(
 
             sell_list.append({
                 "Symbol": symbol,
-                "Signal": "SELL (Institutional Breakdown)",
+                "Signal": "SELL (Chartlink Pattern Match)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Confluence Reasons": ", ".join(reasons) if reasons else "Rolling Breakdown + VWAP",
+                "Confluence Reasons": ", ".join(reasons) if reasons else "15m Breakdown",
                 "Rolling High (₹)": f"₹{rolling_high}",
                 "Rolling Low (₹)": f"₹{rolling_low}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
@@ -790,15 +804,13 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
             ticker = yf.Ticker(f"{symbol.strip().upper()}.NS")
             start_dt = datetime.combine(target_date, datetime.min.time())
             end_dt = start_dt + timedelta(days=1)
-            df_hist = ticker.history(interval="5m", start=start_dt, end=end_dt)
+            df_hist = ticker.history(interval="15m", start=start_dt, end=end_dt) # Updated to 15m timeframe
             if df_hist.empty:
                 continue
 
-            # Handle localized timezone indexes
             if df_hist.index.tz is not None:
                 df_hist.index = df_hist.index.tz_localize(None)
 
-            # Find candle closest to selected backtest time
             target_datetime = datetime.combine(target_date, backtest_time)
             df_hist['time_diff'] = abs(df_hist.index - pd.Timestamp(target_datetime))
             closest_row = df_hist.loc[df_hist['time_diff'].idxmin()]
@@ -929,22 +941,22 @@ active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
 # --- TAB 1: INTRADAY ENGINE ---
 with main_tab1:
-    st.subheader("⚡ Live Intraday Engine (Rolling Breakout + VWAP)")
+    st.subheader("⚡ Live Intraday Engine (15m Range Compression & Volume Spike)")
     col_ctrl1, col_ctrl2 = st.columns([2, 1])
     with col_ctrl1:
-        st.markdown("Click the scan button below to retrieve top high-probability institutional breakouts instantly.")
+        st.markdown("Click the scan button below to retrieve top high-probability setups meeting your exact Chartlink filters.")
     with col_ctrl2:
         post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed())
 
     if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
-        with st.spinner("Scanning Nifty Market-Cap Universe for Institutional Triggers..."):
+        with st.spinner("Scanning Nifty Market-Cap Universe for Chartlink Conditions..."):
             raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
             df_b, df_s = process_rolling_confluence(
                 raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
             )
             if not df_b.empty:
                 top_stock = df_b.iloc[0]["Symbol"]
-                st.toast(f"🚨 INTRADAY BUY ALERT: {top_stock} triggered an institutional breakout!", icon="🔥")
+                st.toast(f"🚨 INTRADAY BUY ALERT: {top_stock} triggered the pattern!", icon="🔥")
             st.session_state["df_b_master"] = df_b
             st.session_state["df_s_master"] = df_s
 
@@ -956,8 +968,8 @@ with main_tab1:
         st.session_state["df_s_master"] = empty_s
 
     sub_tab_buy, sub_tab_sell = st.tabs([
-        f"🟢 Top {selected_count} Long Institutional Breakouts",
-        f"🔴 Top {selected_count} Short Institutional Breakdowns",
+        f"🟢 Top {selected_count} Long Setups",
+        f"🔴 Top {selected_count} Short Setups",
     ])
 
     with sub_tab_buy:
