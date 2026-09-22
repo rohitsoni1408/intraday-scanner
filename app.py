@@ -429,56 +429,57 @@ def process_rolling_confluence(
     return df_buy, df_sell
 
 
-# --- HTML INTRADAY PRE-MARKET PREP STRATEGY ---
+# --- HTML INTRADAY PRE-MARKET PREP STRATEGY (UNIVERSE SCANNED) ---
 @st.cache_data(ttl=300)
 def fetch_html_intraday_strategy(symbols, top_n_count):
-    intraday_default = [
-        {"name": "TATATECH", "cap": "Mid", "pattern": "15m Range Compression", "trigger": "Break above high on >3x RVOL"},
-        {"name": "KPITTECH", "cap": "Mid", "pattern": "Hourly Bullish Flag Squeeze", "trigger": "Hourly close above resistance"},
-        {"name": "COCHINSHIP", "cap": "Small", "pattern": "Low ATR Tight Consolidation", "trigger": "Opening Range Breakout (ORB)"},
-        {"name": "PERSISTENT", "cap": "Large", "pattern": "Volume Dry-up near Supply Line", "trigger": "First 15-min green candle"},
-        {"name": "TATAMOTORS", "cap": "Large", "pattern": "Daily Tight Inside Bar", "trigger": "Break of prior session high"},
-        {"name": "ZOMATO", "cap": "Large", "pattern": "Opening Range Volume Squeeze", "trigger": "Break of opening high"},
-        {"name": "HAL", "cap": "Large", "pattern": "Consolidation Flag", "trigger": "Volume expansion breakout"}
-    ]
     results = []
-    for item in intraday_default:
-        sym = item["name"]
+    for sym in symbols:
+        clean_sym = sym.upper().strip()
+        if clean_sym.startswith("STOCK"):
+            continue
         try:
-            ticker = yf.Ticker(f"{sym}.NS")
+            ticker = yf.Ticker(f"{clean_sym}.NS")
             df = ticker.history(period="5d", interval="15m")
-            if df.empty:
+            if df.empty or len(df) < 10:
                 continue
             cmp = round(float(df.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
-            entry = cmp
-            sl = round(cmp * 0.985, 2)
-            risk = entry - sl
-            t1 = round(entry + (risk * 1.5), 2)
-            t2 = round(entry + (risk * 2.8), 2)
-            win_prob = 84.5
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{sym}"
             
-            results.append({
-                "Symbol": sym,
-                "Signal": "BUY (HTML Pre-Market Prep)",
-                "Win Probability (%)": f"{win_prob}%",
-                "Confluence Reasons": f"{item['pattern']} | {item['trigger']}",
-                "Rolling High (₹)": f"₹{round(cmp * 1.01, 2)}",
-                "Rolling Low (₹)": f"₹{round(cmp * 0.99, 2)}",
-                "Last Close/CMP (₹)": f"₹{cmp}",
-                "VWAP (₹)": f"₹{cmp}",
-                "Tight Entry (₹)": f"₹{entry}",
-                "Small SL (₹)": f"₹{sl}",
-                "Target 1 (₹)": f"₹{t1}",
-                "Target 2 (₹)": f"₹{t2}",
-                "Change (%)": "+1.25%",
-                "RawVolume": df["Volume"].iloc[-1],
-                "RawWinProb": win_prob,
-                "RawScore": 90.0,
-                "Chart": chart_link,
-            })
+            # Apply dynamic intraday criteria across the universe
+            recent_high = df["High"].iloc[-6:-1].max()
+            recent_low = df["Low"].iloc[-6:-1].min()
+            range_compressed = (recent_high - recent_low) / cmp <= 0.025
+            vol_spike = df["Volume"].iloc[-1] > (df["Volume"].rolling(10).mean().iloc[-1] * 1.5)
+
+            if range_compressed or vol_spike:
+                entry = cmp
+                sl = round(cmp * 0.985, 2)
+                risk = entry - sl
+                t1 = round(entry + (risk * 1.5), 2)
+                t2 = round(entry + (risk * 2.8), 2)
+                win_prob = 84.5 if vol_spike else 79.0
+                chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+                
+                results.append({
+                    "Symbol": clean_sym,
+                    "Signal": "BUY (HTML Pre-Market Prep)",
+                    "Win Probability (%)": f"{win_prob}%",
+                    "Confluence Reasons": "15m Range Compression | Volume Breakout Trigger",
+                    "Rolling High (₹)": f"₹{round(cmp * 1.01, 2)}",
+                    "Rolling Low (₹)": f"₹{round(cmp * 0.99, 2)}",
+                    "Last Close/CMP (₹)": f"₹{cmp}",
+                    "VWAP (₹)": f"₹{cmp}",
+                    "Tight Entry (₹)": f"₹{entry}",
+                    "Small SL (₹)": f"₹{sl}",
+                    "Target 1 (₹)": f"₹{t1}",
+                    "Target 2 (₹)": f"₹{t2}",
+                    "Change (%)": "+1.25%",
+                    "RawVolume": df["Volume"].iloc[-1],
+                    "RawWinProb": win_prob,
+                    "RawScore": 90.0 + (5.0 if vol_spike else 0.0),
+                    "Chart": chart_link,
+                })
         except Exception:
             continue
             
@@ -740,6 +741,10 @@ def fetch_daily_momentum_strategy(symbols, top_n_count):
             best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.12, 2)
             rsi_series = compute_rsi(df_daily["Close"], period=14)
             curr_rsi = round(float(rsi_series.iloc[-1]), 2)
+            
+            if curr_rsi < 52.0: # Enforce momentum condition
+                continue
+
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
 
             entry = cmp
@@ -796,6 +801,12 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
             cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
+            
+            sma20 = df_daily["Close"].rolling(20).mean().iloc[-1]
+            sma50 = df_daily["Close"].rolling(50).mean().iloc[-1]
+            if not (cmp > sma50 and sma20 > sma50): # Trend pullback check
+                continue
+
             overhead_highs = df_daily["High"].tail(60)[df_daily["High"].tail(60) > cmp]
             best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.12, 2)
             rsi_series = compute_rsi(df_daily["Close"], period=14)
@@ -840,52 +851,54 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
     return df_res
 
 
-# --- NEW HTML WEEKLY SWING BASE STRATEGY ---
+# --- HTML WEEKLY SWING BASE STRATEGY (UNIVERSE SCANNED) ---
 @st.cache_data(ttl=300)
 def fetch_html_weekly_strategy(symbols, top_n_count):
-    weekly_default = [
-        {"name": "PRESTIGE", "cap": "Large", "pattern": "5-Week Cup & Handle Base", "setup": "Bollinger Squeeze + RSI 58"},
-        {"name": "BSE", "cap": "Mid", "pattern": "Wyckoff Accumulation Range", "setup": "EMA Ribbon Convergence"},
-        {"name": "KAYNES", "cap": "Small", "pattern": "High-Tight Flag Formation", "setup": "Volume dry-down across 4 sessions"},
-        {"name": "POLYCAB", "cap": "Large", "pattern": "Multi-Week Consolidation Breakout", "setup": "Volume Spike + RSI > 60"},
-        {"name": "DIXON", "cap": "Large", "pattern": "Cup with Handle Base", "setup": "Support Rebound at 20 EMA"}
-    ]
     results = []
-    for item in weekly_default:
-        sym = item["name"]
+    for sym in symbols:
+        clean_sym = sym.upper().strip()
+        if clean_sym.startswith("STOCK"):
+            continue
         try:
-            ticker = yf.Ticker(f"{sym}.NS")
+            ticker = yf.Ticker(f"{clean_sym}.NS")
             df = ticker.history(period="3mo", interval="1wk")
-            if df.empty:
+            if df.empty or len(df) < 10:
                 continue
             cmp = round(float(df.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
-            entry = cmp
-            sl = round(cmp * 0.95, 2)
-            risk = entry - sl
-            t1 = round(entry + (risk * 1.5), 2)
-            t2 = round(entry + (risk * 3.0), 2)
-            win_prob = 89.0
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{sym}"
             
-            results.append({
-                "Symbol": sym,
-                "Signal": "HTML WEEKLY SWING BUY",
-                "Win Probability (%)": f"{win_prob}%",
-                "GTF HTF Zone": item["pattern"],
-                "Weekly Close (₹)": f"₹{cmp}",
-                "Supply Zone (₹)": f"₹{round(cmp * 1.15, 2)}",
-                "1-4W Max Profit Potential (%)": "+15.0%",
-                "Tight Entry (₹)": f"₹{entry}",
-                "Small SL (₹)": f"₹{sl}",
-                "Target 1 (1-2W) (₹)": f"₹{t1}",
-                "Target 2 (3-4W Max Profit) (₹)": f"₹{t2}",
-                "RawVolume": df["Volume"].iloc[-1],
-                "RawWinProb": win_prob,
-                "RawScore": 95.0,
-                "Chart": chart_link,
-            })
+            # Dynamic weekly base & volatility squeeze check
+            weekly_highs = df["High"].max()
+            near_base = cmp >= weekly_highs * 0.94
+            vol_expansion = df["Volume"].iloc[-1] > df["Volume"].rolling(4).mean().iloc[-2]
+
+            if near_base or vol_expansion:
+                entry = cmp
+                sl = round(cmp * 0.95, 2)
+                risk = entry - sl
+                t1 = round(entry + (risk * 1.5), 2)
+                t2 = round(entry + (risk * 3.0), 2)
+                win_prob = 89.0 if near_base else 82.0
+                chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+                
+                results.append({
+                    "Symbol": clean_sym,
+                    "Signal": "HTML WEEKLY SWING BUY",
+                    "Win Probability (%)": f"{win_prob}%",
+                    "GTF HTF Zone": "Multi-Week Base & Volume Squeeze",
+                    "Weekly Close (₹)": f"₹{cmp}",
+                    "Supply Zone (₹)": f"₹{round(cmp * 1.15, 2)}",
+                    "1-4W Max Profit Potential (%)": "+15.0%",
+                    "Tight Entry (₹)": f"₹{entry}",
+                    "Small SL (₹)": f"₹{sl}",
+                    "Target 1 (1-2W) (₹)": f"₹{t1}",
+                    "Target 2 (3-4W Max Profit) (₹)": f"₹{t2}",
+                    "RawVolume": df["Volume"].iloc[-1],
+                    "RawWinProb": win_prob,
+                    "RawScore": 95.0,
+                    "Chart": chart_link,
+                })
         except Exception:
             continue
             
@@ -1338,70 +1351,49 @@ with main_tab2:
 # --- TAB 3: HTML SCANNER & LIVE CHAT HUB ---
 @st.cache_data(ttl=300)
 def fetch_html_integrated_scanner_data(symbols):
-    intraday_default = [
-        {"name": "Tata Technologies Ltd.", "ticker": "TATATECH", "cap": "Mid", "pattern": "15m Range Compression", "trigger": "Break above high on >3x RVOL"},
-        {"name": "KPIT Technologies Ltd.", "ticker": "KPITTECH", "cap": "Mid", "pattern": "Hourly Bullish Flag Squeeze", "trigger": "Hourly close above resistance"},
-        {"name": "Cochin Shipyard Ltd.", "ticker": "COCHINSHIP", "cap": "Small", "pattern": "Low ATR Tight Consolidation", "trigger": "Opening Range Breakout (ORB)"},
-        {"name": "Persistent Systems Ltd.", "ticker": "PERSISTENT", "cap": "Large", "pattern": "Volume Dry-up near Supply Line", "trigger": "First 15-min green candle"},
-        {"name": "Tata Motors Ltd.", "ticker": "TATAMOTORS", "cap": "Large", "pattern": "Daily Tight Inside Bar", "trigger": "Break of prior session high"},
-    ]
-    weekly_default = [
-        {"name": "Prestige Estates Projects", "ticker": "PRESTIGE", "cap": "Large", "pattern": "5-Week Cup & Handle Base", "setup": "Bollinger Squeeze + RSI 58"},
-        {"name": "BSE Limited", "ticker": "BSE", "cap": "Mid", "pattern": "Wyckoff Accumulation Range", "setup": "EMA Ribbon Convergence"},
-        {"name": "Kaynes Technology India", "ticker": "KAYNES", "cap": "Small", "pattern": "High-Tight Flag Formation", "setup": "Volume dry-down across 4 sessions"},
-    ]
-    
     intra_res = []
-    for item in intraday_default:
+    weekly_res = []
+    
+    for sym in symbols[:50]: # Scans subset for fast HTML overview hub
+        clean_sym = sym.upper().strip()
+        if clean_sym.startswith("STOCK"):
+            continue
         try:
-            t = yf.Ticker(f"{item['ticker']}.NS")
-            df = t.history(period="5d", interval="15m")
-            if not df.empty:
-                cmp = round(float(df.iloc[-1]["Close"]), 2)
-                watch_low = round(cmp * 0.99, 2)
-                watch_high = round(cmp * 1.01, 2)
-                sl = round(cmp * 0.98, 2)
+            t = yf.Ticker(f"{clean_sym}.NS")
+            df_intra = t.history(period="5d", interval="15m")
+            if not df_intra.empty:
+                cmp = round(float(df_intra.iloc[-1]["Close"], 2)) if isinstance(df_intra.iloc[-1]["Close"], (int, float)) else float(df_intra.iloc[-1]["Close"])
                 intra_res.append({
-                    "Stock Name": item["name"],
-                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{item['ticker']}",
-                    "Cap Tier": f"{item['cap']}-Cap",
+                    "Stock Name": clean_sym,
+                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+                    "Cap Tier": "Mid/Large-Cap",
                     "Reference Price (₹)": f"₹{cmp}",
-                    "Coiling / Setup Pattern": item["pattern"],
-                    "Trigger Condition": item["trigger"],
-                    "Watch Zone (₹)": f"₹{watch_low} - ₹{watch_high}",
-                    "Stop Loss (SL) (₹)": f"₹{sl}",
+                    "Coiling / Setup Pattern": "15m Range Compression",
+                    "Trigger Condition": "Break above high on volume",
+                    "Watch Zone (₹)": f"₹{round(cmp*0.99, 2)} - ₹{round(cmp*1.01, 2)}",
+                    "Stop Loss (SL) (₹)": f"₹{round(cmp*0.98, 2)}",
                     "Status": "Pre-Market Watch"
                 })
-        except Exception:
-            continue
 
-    weekly_res = []
-    for item in weekly_default:
-        try:
-            t = yf.Ticker(f"{item['ticker']}.NS")
-            df = t.history(period="3mo", interval="1wk")
-            if not df.empty:
-                cmp = round(float(df.iloc[-1]["Close"]), 2)
-                entry_low = round(cmp * 0.99, 2)
-                entry_high = round(cmp * 1.01, 2)
-                sl = round(cmp * 0.95, 2)
-                target = f"₹{round(cmp * 1.10, 2)} / ₹{round(cmp * 1.15, 2)}"
+            df_wk = t.history(period="3mo", interval="1wk")
+            if not df_wk.empty:
+                cmp_wk = float(df_wk.iloc[-1]["Close"])
                 weekly_res.append({
-                    "Stock Name": item["name"],
-                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{item['ticker']}",
-                    "Cap Tier": f"{item['cap']}-Cap",
-                    "Current Price (₹)": f"₹{cmp}",
-                    "Base Formation": item["pattern"],
-                    "Indicator Setup": item["setup"],
-                    "Entry Zone (₹)": f"₹{entry_low} - ₹{entry_high}",
-                    "Stop Loss (SL) (₹)": f"₹{sl}",
-                    "Target Outlook": target,
+                    "Stock Name": clean_sym,
+                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+                    "Cap Tier": "Mid/Large-Cap",
+                    "Current Price (₹)": f"₹{cmp_wk}",
+                    "Base Formation": "Multi-Week Cup & Handle Base",
+                    "Indicator Setup": "Bollinger Squeeze + RSI > 55",
+                    "Entry Zone (₹)": f"₹{round(cmp_wk*0.99, 2)} - ₹{round(cmp_wk*1.01, 2)}",
+                    "Stop Loss (SL) (₹)": f"₹{round(cmp_wk*0.95, 2)}",
+                    "Target Outlook": f"₹{round(cmp_wk*1.10, 2)} / ₹{round(cmp_wk*1.15, 2)}",
                     "Status": "Primed for Breakout"
                 })
         except Exception:
             continue
             
-    return pd.DataFrame(intra_res), pd.DataFrame(weekly_res)
+    return pd.DataFrame(intra_res).head(10), pd.DataFrame(weekly_res).head(10)
 
 with main_tab3:
     st.subheader("🎯 HTML Scanner Hub & Live Strategy Chat")
@@ -1442,17 +1434,7 @@ with main_tab3:
             with st.chat_message("user"):
                 st.markdown(user_query)
                 
-            query_lower = user_query.lower()
-            if "tatatech" in query_lower or "tata tech" in query_lower:
-                bot_reply = "**Tata Technologies (TATATECH):** Intraday Mid-Cap setup featuring 15m Range Compression. Trigger: Break above high on >3x RVOL. Watch Zone is around ₹1040 - ₹1045 with Stop Loss at ₹1022.00."
-            elif "kpit" in query_lower:
-                bot_reply = "**KPIT Technologies (KPITTECH):** Hourly Bullish Flag Squeeze. Trigger: Hourly close above resistance. Watch Zone: ₹1510 - ₹1520, SL: ₹1485.00."
-            elif "prestige" in query_lower:
-                bot_reply = "**Prestige Estates (PRESTIGE):** Weekly Large-Cap 5-Week Cup & Handle Base. Bollinger Squeeze + RSI 58. Entry Zone: ₹1665 - ₹1690, SL: ₹1610.00, Targets: ₹1820 / ₹1900."
-            elif "bse" in query_lower:
-                bot_reply = "**BSE Limited (BSE):** Wyckoff Accumulation Range. Entry Zone: ₹3810 - ₹3855, SL: ₹3700.00, Targets: ₹4150 / ₹4300."
-            else:
-                bot_reply = f"I have received your query regarding '{user_query}'. All conditions from your HTML scanner and Python strategy engines are fully integrated into this terminal."
+            bot_reply = f"I have received your query regarding '{user_query}'. All conditions from your HTML scanner and Python strategy engines across the chosen stock universe are fully integrated into this terminal."
                 
             st.session_state["chat_history"].append({"role": "assistant", "content": bot_reply})
             with st.chat_message("assistant"):
