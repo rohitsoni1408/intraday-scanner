@@ -1130,76 +1130,54 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
 
 active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
-# --- TAB 1: LIVE STRATEGIES HUB (GLOBAL SCAN & CACHED TOGGLE) ---
+# --- TAB 1: LIVE STRATEGIES HUB (RADIO BUTTON TOGGLE) ---
 with main_tab1:
     st.subheader("📈 Live Strategy Scanners Hub")
-    st.markdown("Click **Run Global Market Scan** once to scan all intraday and weekly strategies simultaneously. You can then toggle between strategies instantly with zero latency.")
-    
-    if st.button("🚀 Run Global Market Scan (All Strategies)", type="primary", use_container_width=True):
-        with st.spinner(f"Running comprehensive market scan across Top {universe_limit} Nifty Universe for ALL strategies..."):
-            # 1. Intraday Chartlink
-            raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-            df_b_cl, df_s_cl = process_rolling_confluence(
-                raw_stocks, 25, active_universe_pool, force_post_market=is_market_closed()
-            )
-            st.session_state["cache_intra_cl_b"] = df_b_cl
-            st.session_state["cache_intra_cl_s"] = df_s_cl
-
-            # 2. Intraday HTML
-            df_b_html, df_s_html = fetch_html_intraday_strategy(active_universe_pool, 25)
-            st.session_state["cache_intra_html_b"] = df_b_html
-            st.session_state["cache_intra_html_s"] = df_s_html
-
-            # 3. Weekly MTF
-            st.session_state["cache_wk_mtf"] = fetch_weekly_mtf_strategy(active_universe_pool, 25)
-
-            # 4. Vijay Thakkar
-            st.session_state["cache_wk_thakkar"] = fetch_vijay_thakkar_strategy(active_universe_pool, 25)
-
-            # 5. Daily Momentum
-            st.session_state["cache_daily_mom"] = fetch_daily_momentum_strategy(active_universe_pool, 25)
-
-            # 6. Elite Swing
-            st.session_state["cache_elite_swing"] = fetch_elite_swing_strategy(active_universe_pool, 25)
-
-            # 7. HTML Weekly
-            st.session_state["cache_html_weekly"] = fetch_html_weekly_strategy(active_universe_pool, 25)
-
-            st.session_state["global_scan_done"] = True
-            st.success("Global market scan completed! All strategies cached successfully.")
-
-    st.markdown("---")
     
     strategy_type = st.radio(
         "Select Strategy Category:",
         ["Intraday Strategies", "Weekly & Swing Strategies"],
-        horizontal=True,
-        key="master_strategy_radio"
+        horizontal=True
     )
     
     st.markdown("---")
     
     if strategy_type == "Intraday Strategies":
-        st.markdown("### ⚡ Intraday Strategy Engine (Instant Filter)")
+        st.markdown("### ⚡ Intraday Strategy Engine")
         selected_intraday_strategy = st.selectbox(
             "Choose Intraday Strategy:",
             [
                 "Chartlink 15m Range Compression & Volume Spike",
                 "HTML Intraday Pre-Market Prep Setup"
-            ],
-            key="intra_strat_select"
+            ]
         )
         
-        if st.session_state.get("global_scan_done", False):
-            if "Chartlink" in selected_intraday_strategy:
-                df_b = st.session_state.get("cache_intra_cl_b", pd.DataFrame())
-                df_s = st.session_state.get("cache_intra_cl_s", pd.DataFrame())
-            else:
-                df_b = st.session_state.get("cache_intra_html_b", pd.DataFrame())
-                df_s = st.session_state.get("cache_intra_html_s", pd.DataFrame())
-        else:
-            df_b, df_s = pd.DataFrame(), pd.DataFrame()
-            st.info("👆 Click **Run Global Market Scan (All Strategies)** above to load and cache all market results instantly.")
+        col_ctrl1, col_ctrl2 = st.columns([2, 1])
+        with col_ctrl1:
+            st.markdown(f"Selected: **{selected_intraday_strategy}** over Top {universe_limit} Nifty Universe.")
+        with col_ctrl2:
+            post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed(), key="intra_post")
+
+        if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
+            with st.spinner(f"Scanning universe for {selected_intraday_strategy}..."):
+                if "Chartlink" in selected_intraday_strategy:
+                    raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
+                    df_b, df_s = process_rolling_confluence(
+                        raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
+                    )
+                else:
+                    df_b, df_s = fetch_html_intraday_strategy(active_universe_pool, selected_count)
+
+                st.session_state["df_b_master"] = df_b
+                st.session_state["df_s_master"] = df_s
+                st.success("Intraday scan completed successfully!")
+
+        if "df_b_master" not in st.session_state:
+            empty_b, empty_s = process_rolling_confluence(
+                [], selected_count, active_universe_pool, force_post_market=is_market_closed()
+            )
+            st.session_state["df_b_master"] = empty_b
+            st.session_state["df_s_master"] = empty_s
 
         sub_tab_buy, sub_tab_sell = st.tabs([
             f"🟢 Top {selected_count} Long Setups",
@@ -1207,21 +1185,21 @@ with main_tab1:
         ])
 
         with sub_tab_buy:
+            df_b = st.session_state["df_b_master"]
             if not df_b.empty:
-                render_native_table(df_b.head(selected_count), key_prefix="cached_intra_buy")
+                render_native_table(df_b.head(selected_count), key_prefix="intra_buy")
             else:
-                if st.session_state.get("global_scan_done", False):
-                    st.info("No long setups found for this strategy.")
+                st.info("Click 'Run Intraday Scan' to view intraday setups.")
 
         with sub_tab_sell:
+            df_s = st.session_state["df_s_master"]
             if not df_s.empty:
-                render_native_table(df_s.head(selected_count), key_prefix="cached_intra_sell")
+                render_native_table(df_s.head(selected_count), key_prefix="intra_sell")
             else:
-                if st.session_state.get("global_scan_done", False):
-                    st.info("No short setups found for this strategy.")
+                st.info("No short setups found or click scan to update.")
 
     else:
-        st.markdown("### 🗓️ Weekly & Swing Strategy Engine (Instant Filter)")
+        st.markdown("### 🗓️ Weekly & Swing Strategy Engine")
         selected_weekly_strategy = st.selectbox(
             "Choose Weekly / Swing Strategy:",
             [
@@ -1230,30 +1208,31 @@ with main_tab1:
                 "Daily Momentum Strategy (MACD Crossover + VWAP + RSI > 55)",
                 "Elite Swing Strategy (MTF Trend Pullback & Dip Buy)",
                 "HTML Weekly Swing Base Strategy (New HTML Strategy)"
-            ],
-            key="weekly_strat_select"
+            ]
         )
         
-        if st.session_state.get("global_scan_done", False):
-            if "Weekly Higher-Timeframe" in selected_weekly_strategy:
-                df_res = st.session_state.get("cache_wk_mtf", pd.DataFrame())
-            elif "Vijay Thakkar" in selected_weekly_strategy:
-                df_res = st.session_state.get("cache_wk_thakkar", pd.DataFrame())
-            elif "Daily Momentum" in selected_weekly_strategy:
-                df_res = st.session_state.get("cache_daily_mom", pd.DataFrame())
-            elif "Elite Swing" in selected_weekly_strategy:
-                df_res = st.session_state.get("cache_elite_swing", pd.DataFrame())
-            else:
-                df_res = st.session_state.get("cache_html_weekly", pd.DataFrame())
-        else:
-            df_res = pd.DataFrame()
-            st.info("👆 Click **Run Global Market Scan (All Strategies)** above to load and cache all market results instantly.")
+        st.markdown(f"Selected: **{selected_weekly_strategy}** over Top {universe_limit} Nifty Universe.")
 
-        if not df_res.empty:
-            render_native_table(df_res.head(selected_count), key_prefix="cached_weekly_strategy_tab")
+        if st.button("🚀 Run Weekly / Swing Scan", type="primary", use_container_width=True):
+            with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_weekly_strategy}..."):
+                if "Weekly Higher-Timeframe" in selected_weekly_strategy:
+                    df_res = fetch_weekly_mtf_strategy(active_universe_pool, selected_count)
+                elif "Vijay Thakkar" in selected_weekly_strategy:
+                    df_res = fetch_vijay_thakkar_strategy(active_universe_pool, selected_count)
+                elif "Daily Momentum" in selected_weekly_strategy:
+                    df_res = fetch_daily_momentum_strategy(active_universe_pool, selected_count)
+                elif "Elite Swing" in selected_weekly_strategy:
+                    df_res = fetch_elite_swing_strategy(active_universe_pool, selected_count)
+                else:
+                    df_res = fetch_html_weekly_strategy(active_universe_pool, selected_count)
+
+                st.session_state["df_dropdown_strategy"] = df_res
+                st.success("Scan completed successfully!")
+
+        if "df_dropdown_strategy" in st.session_state and not st.session_state["df_dropdown_strategy"].empty:
+            render_native_table(st.session_state["df_dropdown_strategy"].head(selected_count), key_prefix="dropdown_strategy_tab")
         else:
-            if st.session_state.get("global_scan_done", False):
-                st.info("No signals found matching this weekly strategy.")
+            st.info("Select a strategy above and click the button to view live signals.")
 
 
 # --- TAB 2: BACKTESTERS HUB (RADIO BUTTON TOGGLE) ---
@@ -1481,7 +1460,7 @@ with main_tab3:
 with main_tab4:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
-    - **Tab 1 (Live Strategies Hub):** Click **Run Global Market Scan** once to scan all intraday and weekly strategies simultaneously. Use the radio button and dropdowns to instantly filter cached results.
+    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Chartlink & HTML pre-market) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing).
     - **Tab 2 (Backtesters Hub):** Use the radio button to switch between the **Intraday Session Backtester** and the **Weekly / Swing Historical Backtester**.
     - **Tab 3 (HTML Scanner & Live Chat Hub):** Direct integration of HTML dashboard scans and interactive AI trading assistant.
     - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
