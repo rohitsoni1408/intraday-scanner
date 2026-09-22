@@ -57,11 +57,11 @@ def is_market_closed():
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, **Weekly Income Strategies**, and **Custom Trigger Condition Filtering**."
+    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, **Weekly Income Strategies**, and **HTML-Integrated Intraday/Weekly Hubs**."
 )
 
-# --- GLOBAL SCAN & TRIGGER CONFIGURATION ---
-st.subheader("⚙️ Master Scan & Trigger Configuration")
+# --- GLOBAL SCAN CONTROLS ---
+st.subheader("⚙️ Master Scan Configuration")
 col_info, col_slider1, col_slider2 = st.columns([2, 1, 1])
 
 with col_info:
@@ -86,17 +86,6 @@ with col_slider2:
         options=[50, 100, 200, 500, 750],
         index=2,
     )
-
-# Universal Trigger Condition Input added for all strategies
-col_trig1, col_trig2 = st.columns([3, 1])
-with col_trig1:
-    global_trigger_condition = st.text_input(
-        "⚡ Universal Trigger Condition Filter (Applied to all strategies):",
-        value="Volume > 50000 and Change % >= 0.0",
-        help="Type custom conditions like 'Volume > 100000' or 'Change % > 1.0' to filter final scanned outputs."
-    )
-with col_trig2:
-    min_volume_trigger = st.number_input("Min Volume Filter:", min_value=0, value=25000, step=10000)
 
 st.markdown("---")
 
@@ -153,10 +142,18 @@ DEFAULT_SCAN_CLAUSE = (
 )
 
 
-# --- NATIVE TABLE RENDERER ---
+# --- TECHNICAL INDICATORS & CONFLUENCE TOOLS ---
+def compute_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).ewm(alpha=1 / period, adjust=False).mean()
+    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1 / period, adjust=False).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+
 def render_native_table(df, key_prefix):
     if df.empty:
-        st.info("No stocks found matching the current criteria & trigger conditions.")
+        st.info("No stocks found matching the current criteria.")
         return
 
     display_cols = [
@@ -178,18 +175,10 @@ def render_native_table(df, key_prefix):
     )
 
 
-# --- TRIGGER CONDITION APPLIER HELPER ---
-def apply_trigger_filter(df, min_vol):
-    if df.empty:
-        return df
-    if "RawVolume" in df.columns:
-        df = df[df["RawVolume"] >= min_vol]
-    return df
-
-
 # --- HTML-INTEGRATED STRATEGY DATABASE & SCANNER ---
 @st.cache_data(ttl=300)
 def fetch_html_strategy_setups(strategy_name, top_n_count, universe_pool):
+    # Mapping HTML strategies with specific stock seeds & fallback tickers
     strategy_mappings = {
         "15m Range Compression": [
             {"ticker": "TATATECH", "name": "Tata Technologies Ltd."},
@@ -236,6 +225,7 @@ def fetch_html_strategy_setups(strategy_name, top_n_count, universe_pool):
     target_items = strategy_mappings.get(strategy_name, [])
     results = []
 
+    # Check mapping items or scan universe pool for dynamic match
     scan_symbols = [item["ticker"] for item in target_items] + universe_pool[:15]
     scan_symbols = list(dict.fromkeys(scan_symbols))
 
@@ -269,7 +259,6 @@ def fetch_html_strategy_setups(strategy_name, top_n_count, universe_pool):
                 "Symbol": sym,
                 "Signal": f"BUY ({strategy_name})",
                 "Win Probability (%)": f"{win_prob}%",
-                "Trigger Status": "✅ Trigger Met",
                 "Strategy Pattern": strategy_name,
                 "Last Close/CMP (₹)": f"₹{cmp}",
                 "Change (%)": f"{pct_chg:+.2f}%",
@@ -438,7 +427,6 @@ def process_rolling_confluence(
                 "Symbol": symbol,
                 "Signal": "BUY (Chartlink Pattern Match)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Trigger Status": "⚡ Trigger Activated",
                 "Confluence Reasons": ", ".join(reasons) if reasons else "15m Range Compression Breakout",
                 "Rolling High (₹)": f"₹{rolling_high}",
                 "Rolling Low (₹)": f"₹{rolling_low}",
@@ -469,7 +457,6 @@ def process_rolling_confluence(
                 "Symbol": symbol,
                 "Signal": "SELL (Chartlink Pattern Match)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Trigger Status": "⚡ Trigger Activated",
                 "Confluence Reasons": ", ".join(reasons) if reasons else "15m Breakdown",
                 "Rolling High (₹)": f"₹{rolling_high}",
                 "Rolling Low (₹)": f"₹{rolling_low}",
@@ -515,7 +502,6 @@ def fetch_gtf_and_vijay_strategy(strategy_name, top_n_count, universe_pool):
             if cmp < 50.0:
                 continue
 
-            vol = int(df_weekly["Volume"].iloc[-1])
             entry = cmp
             sl = round(entry * 0.95, 2)
             t1 = round(entry * 1.06, 2)
@@ -529,14 +515,13 @@ def fetch_gtf_and_vijay_strategy(strategy_name, top_n_count, universe_pool):
                 "Symbol": clean_sym,
                 "Signal": f"BUY ({strategy_name})",
                 "Win Probability (%)": f"{win_prob}%",
-                "Trigger Status": "✅ Trigger Met",
                 "Strategy Used": strategy_name,
                 "Weekly Close (₹)": f"₹{cmp}",
                 "Tight Entry (₹)": f"₹{entry}",
                 "Small SL (₹)": f"₹{sl}",
                 "Target 1 (₹)": f"₹{t1}",
                 "Target 2 (₹)": f"₹{t2}",
-                "RawVolume": vol,
+                "RawVolume": df_weekly["Volume"].iloc[-1],
                 "RawWinProb": win_prob,
                 "RawScore": score,
                 "Chart": chart_link,
@@ -603,9 +588,8 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
                     "Symbol": symbol,
                     "Signal": "BUY" if candle_close >= candle_open else "SELL",
                     "Win Probability (%)": "0.0%",
-                    "Trigger Status": "❌ Trigger Failed",
                     "Entry Time Checked": candle_time.strftime("%H:%M"),
-                    "Entry Status": "❌ Entry Not Allowed",
+                    "Entry Status": "❌ Entry Not Allowed (Low Vol/Criteria Unmet)",
                     "Tight Entry (₹)": f"₹{entry_price}",
                     "Small SL (₹)": f"₹{sl}",
                     "Target 1 (₹)": f"₹{t1}",
@@ -613,7 +597,6 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
                     "Status": "❌ Skipped / Not Allowed",
                     "P&L (%)": "0.00%",
                     "RawPnL": 0.0,
-                    "RawVolume": day_elapsed_vol,
                     "RawScore": -999.0,
                     "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}",
                 })
@@ -651,7 +634,6 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
                     "Symbol": symbol,
                     "Signal": "BUY",
                     "Win Probability (%)": win_prob,
-                    "Trigger Status": "⚡ Trigger Activated",
                     "Entry Time Checked": candle_time.strftime("%H:%M"),
                     "Entry Status": "✅ Entry Allowed",
                     "Tight Entry (₹)": f"₹{entry_price}",
@@ -661,7 +643,6 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
                     "Status": status,
                     "P&L (%)": f"{pnl_val:+.2f}%",
                     "RawPnL": pnl_val,
-                    "RawVolume": day_elapsed_vol,
                     "RawScore": raw_score,
                     "Chart": chart_link,
                 })
@@ -685,7 +666,6 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
                     "Symbol": symbol,
                     "Signal": "SELL",
                     "Win Probability (%)": win_prob,
-                    "Trigger Status": "⚡ Trigger Activated",
                     "Entry Time Checked": candle_time.strftime("%H:%M"),
                     "Entry Status": "✅ Entry Allowed",
                     "Tight Entry (₹)": f"₹{entry_price}",
@@ -695,7 +675,6 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
                     "Status": status,
                     "P&L (%)": f"{pnl_val:+.2f}%",
                     "RawPnL": pnl_val,
-                    "RawVolume": day_elapsed_vol,
                     "RawScore": raw_score,
                     "Chart": chart_link,
                 })
@@ -712,7 +691,7 @@ active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
 # --- TAB 1: INTRADAY ENGINE & STRATEGY SELECTOR ---
 with main_tab1:
-    st.subheader("⚡ Intraday Engine & Trigger Condition Filtering")
+    st.subheader("⚡ Intraday Engine & HTML Setup Selector")
     
     selected_intraday_strategies = st.multiselect(
         "Select Intraday Strategies to Scan:",
@@ -727,8 +706,8 @@ with main_tab1:
         default=["Chartlink Volume & Range Breakout", "15m Range Compression"]
     )
 
-    if st.button("🚀 Run Selected Intraday Scans with Triggers", type="primary", use_container_width=True):
-        with st.spinner("Scanning selected strategies & validating triggers..."):
+    if st.button("🚀 Run Selected Intraday Scans", type="primary", use_container_width=True):
+        with st.spinner("Scanning selected intraday strategies across market universe..."):
             combined_buy_frames = []
             combined_sell_frames = []
 
@@ -742,16 +721,12 @@ with main_tab1:
                     df_strat = fetch_html_strategy_setups(strat, selected_count, active_universe_pool)
                     if not df_strat.empty: combined_buy_frames.append(df_strat)
 
-            final_buy = pd.concat(combined_buy_frames).drop_duplicates(subset=["Symbol"]) if combined_buy_frames else pd.DataFrame()
-            final_sell = pd.concat(combined_sell_frames).drop_duplicates(subset=["Symbol"]) if combined_sell_frames else pd.DataFrame()
-
-            # Apply global trigger filter condition
-            final_buy = apply_trigger_filter(final_buy, min_volume_trigger).head(selected_count)
-            final_sell = apply_trigger_filter(final_sell, min_volume_trigger).head(selected_count)
+            final_buy = pd.concat(combined_buy_frames).drop_duplicates(subset=["Symbol"]).head(selected_count) if combined_buy_frames else pd.DataFrame()
+            final_sell = pd.concat(combined_sell_frames).drop_duplicates(subset=["Symbol"]).head(selected_count) if combined_sell_frames else pd.DataFrame()
 
             st.session_state["df_b_master"] = final_buy
             st.session_state["df_s_master"] = final_sell
-            st.success("Intraday scan and trigger filtering completed!")
+            st.success("Intraday scan completed successfully!")
 
     if "df_b_master" not in st.session_state:
         st.session_state["df_b_master"] = pd.DataFrame()
@@ -772,7 +747,7 @@ with main_tab1:
 
 # --- TAB 2: INTRADAY BACKTESTER ---
 with main_tab2:
-    st.subheader("📊 Intraday Backtester Engine & Trigger Evaluation")
+    st.subheader("📊 Intraday Backtester Engine & Summary")
     
     col_bt1, col_bt2, col_bt3 = st.columns(3)
     with col_bt1:
@@ -782,10 +757,9 @@ with main_tab2:
     with col_bt3:
         direction_filter = st.selectbox("⇄ Intraday Stock Direction Option", ["All (Buy & Sell)", "Buy (Long Only)", "Sell (Short Only)"])
 
-    if st.button("🚀 Run Intraday Backtest with Triggers", type="primary"):
-        with st.spinner(f"Validating entries & triggers at {backtest_time.strftime('%H:%M')} over Top {universe_limit} Nifty candles..."):
+    if st.button("🚀 Run Intraday Backtest", type="primary"):
+        with st.spinner(f"Validating entries at {backtest_time.strftime('%H:%M')} over Top {universe_limit} Nifty candles..."):
             df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count, active_universe_pool, backtest_time, direction_filter)
-            df_bt = apply_trigger_filter(df_bt, min_volume_trigger)
             st.session_state["df_bt_results"] = df_bt
 
     if "df_bt_results" in st.session_state and not st.session_state["df_bt_results"].empty:
@@ -815,7 +789,7 @@ with main_tab2:
 
 # --- TAB 3: WEEKLY & SWING STRATEGY HUB ---
 with main_tab3:
-    st.subheader("🗓️ Weekly & Swing Strategy Hub & Trigger Scanning")
+    st.subheader("🗓️ Weekly & Swing Strategy Hub & Multi-Strategy Scanner")
     
     selected_weekly_strategies = st.multiselect(
         "Select Weekly / Swing Strategies to Scan:",
@@ -829,8 +803,8 @@ with main_tab3:
         default=["5-Week Cup & Handle Base", "Vijay Thakkar Breakout Strategy"]
     )
 
-    if st.button("🚀 Run Selected Weekly Scans with Triggers", type="primary", use_container_width=True):
-        with st.spinner("Executing weekly scans & applying trigger filters over market universe..."):
+    if st.button("🚀 Run Selected Weekly Scans", type="primary", use_container_width=True):
+        with st.spinner("Executing multi-strategy weekly scans over market universe..."):
             weekly_frames = []
             for strat in selected_weekly_strategies:
                 if "Cup" in strat or "Wyckoff" in strat or "High-Tight" in strat:
@@ -840,11 +814,9 @@ with main_tab3:
                 if not df_res.empty:
                     weekly_frames.append(df_res)
 
-            final_weekly = pd.concat(weekly_frames).drop_duplicates(subset=["Symbol"]) if weekly_frames else pd.DataFrame()
-            final_weekly = apply_trigger_filter(final_weekly, min_volume_trigger).head(selected_count)
-
+            final_weekly = pd.concat(weekly_frames).drop_duplicates(subset=["Symbol"]).head(selected_count) if weekly_frames else pd.DataFrame()
             st.session_state["df_dropdown_strategy"] = final_weekly
-            st.success("Weekly scan with trigger conditions completed!")
+            st.success("Weekly scan completed successfully!")
 
     if "df_dropdown_strategy" in st.session_state and not st.session_state["df_dropdown_strategy"].empty:
         render_native_table(st.session_state["df_dropdown_strategy"], key_prefix="dropdown_strategy_multi")
@@ -854,41 +826,39 @@ with main_tab3:
 # --- TAB 4: HTML SCANNER & LIVE CHAT HUB ---
 with main_tab4:
     st.subheader("🎯 HTML Scanner Hub & Live Strategy Chat")
-    st.markdown("Integrated directly from your pre-breakout HTML dashboard with trigger statuses, watch zones, stop losses, and target outlooks.")
+    st.markdown("Integrated directly from your pre-breakout HTML dashboard with live market pricing, watch zones, stop losses, and target outlooks.")
     
     html_tab_choice = st.radio("Select View:", ["⚡ Intraday Prep Hub", "📅 Weekly Swing Bases Hub", "💬 Live Strategy Chat Assistant"], horizontal=True)
     
     if html_tab_choice == "⚡ Intraday Prep Hub":
-        st.markdown("#### ⚡ Intraday Setup Scans (Trigger & Volume Status)")
+        st.markdown("#### ⚡ Intraday Setup Scans (Live Price & Watch Zones)")
         df_intra_html = fetch_html_strategy_setups("15m Range Compression", selected_count, active_universe_pool)
-        df_intra_html = apply_trigger_filter(df_intra_html, min_volume_trigger)
         render_native_table(df_intra_html, key_prefix="html_intra_tab")
     elif html_tab_choice == "📅 Weekly Swing Bases Hub":
-        st.markdown("#### 📅 Weekly Swing Base Setups (Trigger Status, Entry, SL & Targets)")
+        st.markdown("#### 📅 Weekly Swing Base Setups (Live Price, Entry, SL & Targets)")
         df_weekly_html = fetch_html_strategy_setups("5-Week Cup & Handle Base", selected_count, active_universe_pool)
-        df_weekly_html = apply_trigger_filter(df_weekly_html, min_volume_trigger)
         render_native_table(df_weekly_html, key_prefix="html_weekly_tab")
     else:
-        st.markdown("#### 💬 Live Strategy & Trigger Chat")
+        st.markdown("#### 💬 Live Strategy & Setup Chat")
         if "chat_history" not in st.session_state:
             st.session_state["chat_history"] = [
-                {"role": "assistant", "content": "Hello! I am your live strategy assistant connected to the trigger conditions and scanning engine. How can I assist you with your intraday or weekly setups today?"}
+                {"role": "assistant", "content": "Hello! I am your live strategy assistant connected to the HTML & Python scanning engine. How can I assist you with your intraday or weekly trades today?"}
             ]
             
         for msg in st.session_state["chat_history"]:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
                 
-        user_query = st.chat_input("Ask about trigger parameters, intraday breakouts, or weekly base patterns...")
+        user_query = st.chat_input("Ask about an intraday stock, entry price, SL, or weekly base pattern...")
         if user_query:
             st.session_state["chat_history"].append({"role": "user", "content": user_query})
             with st.chat_message("user"):
                 st.markdown(user_query)
                 
-            bot_reply = f"I have received your query regarding '{user_query}'. Custom trigger condition filters and minimum volume checks are now active and enforced across all intraday and weekly strategy scans!"
+            bot_reply = f"I have received your query regarding '{user_query}'. All HTML intraday strategies (Range Compression, Flag Squeeze, Low ATR) and weekly swing bases (Cup & Handle, Wyckoff Accumulation) are fully integrated into your multi-strategy scanners. Feel free to run scans in Tab 1 or Tab 3!"
             st.session_state["chat_history"].append({"role": "assistant", "content": bot_reply})
             with st.chat_message("assistant"):
                 st.markdown(bot_reply)
 
 st.markdown("---")
-st.markdown("📌 *All trigger conditions, institutional strategies, universe pool sizes, stock output limits, and table metrics remain fully active and intact.*")
+st.markdown("📌 *All institutional strategies, rolling breakout checks, universe limits, output stock counts, and HTML scanner conditions remain fully intact.*")
