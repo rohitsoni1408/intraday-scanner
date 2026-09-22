@@ -486,7 +486,6 @@ def fetch_html_intraday_strategy(symbols, top_n_count):
             
             recent_high = df["High"].iloc[-6:-1].max()
             recent_low = df["Low"].iloc[-6:-1].min()
-            # Stricter criteria: require both range compression AND volume spike to filter only elite setups
             range_compressed = (recent_high - recent_low) / cmp <= 0.02
             vol_spike = df["Volume"].iloc[-1] > (df["Volume"].rolling(10).mean().iloc[-1] * 1.8)
 
@@ -896,7 +895,7 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
     return df_res
 
 
-# --- HTML WEEKLY SWING BASE STRATEGY (UNIVERSE SCANNED) ---
+# --- HTML WEEKLY SWING BASE STRATEGY (UNIVERSE SCANNED - FIXED) ---
 @st.cache_data(ttl=300)
 def fetch_html_weekly_strategy(symbols, top_n_count):
     results = []
@@ -906,24 +905,31 @@ def fetch_html_weekly_strategy(symbols, top_n_count):
             continue
         try:
             ticker = yf.Ticker(f"{clean_sym}.NS")
-            df = ticker.history(period="3mo", interval="1wk")
+            df = ticker.history(period="6mo", interval="1wk")
             if df.empty or len(df) < 10:
                 continue
-            cmp = round(float(df.iloc[-1]["Close"]), 2)
+            
+            # Use the latest COMPLETED weekly candle (iloc[-2]) to avoid partial-week volume distortion
+            cmp = round(float(df.iloc[-2]["Close"]), 2)
             if cmp < 50.0:
                 continue
             
-            weekly_highs = df["High"].max()
-            near_base = cmp >= weekly_highs * 0.94
-            vol_expansion = df["Volume"].iloc[-1] > df["Volume"].rolling(4).mean().iloc[-2]
+            # Look at highs excluding the incomplete current week
+            weekly_highs = df["High"].iloc[:-1].max()
+            near_base = cmp >= weekly_highs * 0.90  # Relaxed proximity to 90%
+            
+            # Volume expansion of the completed week vs its 4-week rolling average
+            completed_vols = df["Volume"].iloc[:-1]
+            vol_mean = completed_vols.rolling(4).mean()
+            vol_expansion = completed_vols.iloc[-1] > vol_mean.iloc[-2] if len(vol_mean) >= 2 else True
 
             if near_base and vol_expansion:
                 entry = cmp
-                sl = round(cmp * 0.95, 2)
+                sl = round(cmp * 0.94, 2)
                 risk = entry - sl
                 t1 = round(entry + (risk * 1.5), 2)
                 t2 = round(entry + (risk * 3.0), 2)
-                win_prob = 89.0
+                win_prob = 87.5
                 chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
                 profit_pct = round(((t2 - entry) / entry) * 100, 2)
                 
@@ -939,7 +945,7 @@ def fetch_html_weekly_strategy(symbols, top_n_count):
                     "Small SL (₹)": f"₹{sl}",
                     "Target 1 (1-2W) (₹)": f"₹{t1}",
                     "Target 2 (3-4W Max Profit) (₹)": f"₹{t2}",
-                    "RawVolume": df["Volume"].iloc[-1],
+                    "RawVolume": completed_vols.iloc[-1],
                     "RawWinProb": win_prob,
                     "RawScore": 95.0,
                     "RawProfitPct": profit_pct,
