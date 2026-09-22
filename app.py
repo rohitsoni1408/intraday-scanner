@@ -89,11 +89,12 @@ with col_slider2:
 
 st.markdown("---")
 
+# --- CONSOLIDATED 4-TAB LAYOUT ---
 main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
-    "⚡ Intraday Engine (Live & Rolling)",
-    "📊 Intraday Backtester",
-    "🗓️ Weekly & Swing Strategy Hub",
-    "🎯 HTML Scanner & Live Chat Hub"
+    "📈 Live Strategies Hub",
+    "📊 Backtesters Hub",
+    "🎯 HTML Scanner & Live Chat Hub",
+    "📌 Terminal Info & Guide"
 ])
 
 
@@ -149,60 +150,6 @@ def compute_rsi(series, period=14):
     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1 / period, adjust=False).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
-
-
-def compute_macd(series, fast=12, slow=26, signal=9):
-    exp1 = series.ewm(span=fast, adjust=False).mean()
-    exp2 = series.ewm(span=slow, adjust=False).mean()
-    macd = exp1 - exp2
-    signal_line = macd.ewm(span=signal, adjust=False).mean()
-    hist = macd - signal_line
-    return macd, signal_line, hist
-
-
-def compute_bollinger_bands(series, window=20, num_std=2):
-    sma = series.rolling(window=window).mean()
-    std = series.rolling(window=window).std()
-    upper_band = sma + (std * num_std)
-    lower_band = sma - (std * num_std)
-    return upper_band, sma, lower_band
-
-
-def compute_supertrend(df, period=10, multiplier=3):
-    hl2 = (df["High"] + df["Low"]) / 2
-    atr = (df["High"] - df["Low"]).rolling(window=period).mean()
-    upper_band = hl2 + (multiplier * atr)
-    lower_band = hl2 - (multiplier * atr)
-    
-    trend = pd.Series(1, index=df.index)
-    for i in range(1, len(df)):
-        if df["Close"].iloc[i] > upper_band.iloc[i-1]:
-            trend.iloc[i] = 1
-        elif df["Close"].iloc[i] < lower_band.iloc[i-1]:
-            trend.iloc[i] = -1
-        else:
-            trend.iloc[i] = trend.iloc[i-1]
-            if trend.iloc[i] == 1 and lower_band.iloc[i] < lower_band.iloc[i-1]:
-                lower_band.iloc[i] = lower_band.iloc[i-1]
-            if trend.iloc[i] == -1 and upper_band.iloc[i] > upper_band.iloc[i-1]:
-                upper_band.iloc[i] = upper_band.iloc[i-1]
-                
-    return trend
-
-
-def compute_volume_profile_poc(df, bins=15):
-    if df.empty or "Volume" not in df.columns:
-        return round(float(df["Close"].iloc[-1]), 2)
-    price_min = df["Low"].min()
-    price_max = df["High"].max()
-    if price_min == price_max:
-        return round(price_min, 2)
-    counts, bin_edges = np.histogram(
-        df["Close"], bins=bins, weights=df["Volume"]
-    )
-    poc_idx = np.argmax(counts)
-    poc_price = (bin_edges[poc_idx] + bin_edges[poc_idx + 1]) / 2
-    return round(float(poc_price), 2)
 
 
 # --- ROLLING INSTITUTIONAL DATA FETCHERS ---
@@ -534,7 +481,7 @@ def fetch_html_intraday_strategy(symbols, top_n_count):
     df_res = pd.DataFrame(results)
     if not df_res.empty:
         df_res = df_res.sort_values(by="RawWinProb", ascending=False).head(top_n_count)
-    return df_res, pd.DataFrame() # returns buy, empty sell for consistency
+    return df_res, pd.DataFrame()
 
 
 # --- GTF MULTIPLE TIMEFRAME ANALYSIS (MTFA) & WEEKLY STRATEGIES ---
@@ -708,18 +655,6 @@ def fetch_vijay_thakkar_strategy(symbols, top_n_count):
                         breakout_type = "Multiweek Breakout"
                         breakout_level = round(multiweek_res, 2)
                         retest_details = f"Retesting Multiweek Resistance level at ₹{breakout_level}"
-
-            if not breakout_type and len(df_weekly) >= 20:
-                highs = df_weekly["High"].tail(24).values
-                x = np.arange(len(highs))
-                slope, intercept = np.polyfit(x[:18], highs[:18], 1)
-                if slope <= 0.05:
-                    trendline_val = slope * (len(highs) - 1) + intercept
-                    recent_breakout_check = highs[-6:].max()
-                    if recent_breakout_check > trendline_val * 1.01 and (trendline_val * 0.95 <= cmp <= trendline_val * 1.06):
-                        breakout_type = "Trendline Breakout"
-                        breakout_level = round(trendline_val, 2)
-                        retest_details = f"Retesting Trendline Resistance line at ₹{breakout_level}"
 
             if not breakout_type:
                 continue
@@ -1195,142 +1130,98 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
 
 active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
-# --- TAB 1: INTRADAY ENGINE (WITH STRATEGY SELECTOR) ---
+# --- TAB 1: LIVE STRATEGIES HUB (RADIO BUTTON TOGGLE) ---
 with main_tab1:
-    st.subheader("⚡ Intraday Strategy Hub")
+    st.subheader("📈 Live Strategy Scanners Hub")
     
-    selected_intraday_strategy = st.selectbox(
-        "Choose Intraday Strategy:",
-        [
-            "Chartlink 15m Range Compression & Volume Spike",
-            "HTML Intraday Pre-Market Prep Setup"
-        ]
+    strategy_type = st.radio(
+        "Select Strategy Category:",
+        ["Intraday Strategies", "Weekly & Swing Strategies"],
+        horizontal=True
     )
     
-    col_ctrl1, col_ctrl2 = st.columns([2, 1])
-    with col_ctrl1:
-        st.markdown(f"Selected: **{selected_intraday_strategy}** over Top {universe_limit} Nifty Universe.")
-    with col_ctrl2:
-        post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed())
+    st.markdown("---")
+    
+    if strategy_type == "Intraday Strategies":
+        st.markdown("### ⚡ Intraday Strategy Engine")
+        selected_intraday_strategy = st.selectbox(
+            "Choose Intraday Strategy:",
+            [
+                "Chartlink 15m Range Compression & Volume Spike",
+                "HTML Intraday Pre-Market Prep Setup"
+            ]
+        )
+        
+        col_ctrl1, col_ctrl2 = st.columns([2, 1])
+        with col_ctrl1:
+            st.markdown(f"Selected: **{selected_intraday_strategy}** over Top {universe_limit} Nifty Universe.")
+        with col_ctrl2:
+            post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed(), key="intra_post")
 
-    if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
-        with st.spinner(f"Scanning universe for {selected_intraday_strategy}..."):
-            if "Chartlink" in selected_intraday_strategy:
-                raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-                df_b, df_s = process_rolling_confluence(
-                    raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
-                )
+        if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
+            with st.spinner(f"Scanning universe for {selected_intraday_strategy}..."):
+                if "Chartlink" in selected_intraday_strategy:
+                    raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
+                    df_b, df_s = process_rolling_confluence(
+                        raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
+                    )
+                else:
+                    df_b, df_s = fetch_html_intraday_strategy(active_universe_pool, selected_count)
+
+                st.session_state["df_b_master"] = df_b
+                st.session_state["df_s_master"] = df_s
+                st.success("Intraday scan completed successfully!")
+
+        if "df_b_master" not in st.session_state:
+            empty_b, empty_s = process_rolling_confluence(
+                [], selected_count, active_universe_pool, force_post_market=is_market_closed()
+            )
+            st.session_state["df_b_master"] = empty_b
+            st.session_state["df_s_master"] = empty_s
+
+        sub_tab_buy, sub_tab_sell = st.tabs([
+            f"🟢 Top {selected_count} Long Setups",
+            f"🔴 Top {selected_count} Short Setups",
+        ])
+
+        with sub_tab_buy:
+            df_b = st.session_state["df_b_master"]
+            if not df_b.empty:
+                render_native_table(df_b.head(selected_count), key_prefix="intra_buy")
             else:
-                df_b, df_s = fetch_html_intraday_strategy(active_universe_pool, selected_count)
+                st.info("Click 'Run Intraday Scan' to view intraday setups.")
 
-            st.session_state["df_b_master"] = df_b
-            st.session_state["df_s_master"] = df_s
-            st.success("Intraday scan completed successfully!")
+        with sub_tab_sell:
+            df_s = st.session_state["df_s_master"]
+            if not df_s.empty:
+                render_native_table(df_s.head(selected_count), key_prefix="intra_sell")
+            else:
+                st.info("No short setups found or click scan to update.")
 
-    if "df_b_master" not in st.session_state:
-        empty_b, empty_s = process_rolling_confluence(
-            [], selected_count, active_universe_pool, force_post_market=post_market_toggle
-        )
-        st.session_state["df_b_master"] = empty_b
-        st.session_state["df_s_master"] = empty_s
-
-    sub_tab_buy, sub_tab_sell = st.tabs([
-        f"🟢 Top {selected_count} Long Setups",
-        f"🔴 Top {selected_count} Short Setups",
-    ])
-
-    with sub_tab_buy:
-        df_b = st.session_state["df_b_master"]
-        if not df_b.empty:
-            render_native_table(df_b.head(selected_count), key_prefix="intra_buy")
-        else:
-            st.info("Click 'Run Intraday Scan' to view intraday setups.")
-
-    with sub_tab_sell:
-        df_s = st.session_state["df_s_master"]
-        if not df_s.empty:
-            render_native_table(df_s.head(selected_count), key_prefix="intra_sell")
-        else:
-            st.info("No short setups found or click scan to update.")
-
-# --- TAB 2: INTRADAY BACKTESTER ---
-with main_tab2:
-    st.subheader("📊 Intraday Backtester Engine & Summary")
-    
-    col_bt1, col_bt2, col_bt3 = st.columns(3)
-    with col_bt1:
-        backtest_date = st.date_input(
-            "📅 Select Backtest Session Date",
-            value=datetime.today().date() - timedelta(days=1),
-        )
-    with col_bt2:
-        backtest_time = st.time_input(
-            "⏱️ Select Entry Check Time",
-            value=time(9, 30),
-            step=300
-        )
-    with col_bt3:
-        direction_filter = st.selectbox(
-            "⇄ Intraday Stock Direction Option",
-            ["All (Buy & Sell)", "Buy (Long Only)", "Sell (Short Only)"]
-        )
-
-    if st.button("🚀 Run Intraday Backtest", type="primary"):
-        with st.spinner(f"Validating entries at {backtest_time.strftime('%H:%M')} over Top {universe_limit} Nifty candles..."):
-            df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count, active_universe_pool, backtest_time, direction_filter)
-            st.session_state["df_bt_results"] = df_bt
-
-    if "df_bt_results" in st.session_state and not st.session_state["df_bt_results"].empty:
-        df_bt = st.session_state["df_bt_results"].head(selected_count)
-
-        total_trades = len(df_bt)
-        allowed_trades = len(df_bt[df_bt["Entry Status"].str.contains("Allowed", na=False)])
-        t1_hits = len(df_bt[df_bt["Status"].str.contains("Target 1", na=False)])
-        t2_hits = len(df_bt[df_bt["Status"].str.contains("Target 2", na=False)])
-        sl_hits = len(df_bt[df_bt["Status"].str.contains("SL Hit", na=False)])
-        wins = t1_hits + t2_hits
-        win_rate = round((wins / allowed_trades) * 100, 2) if allowed_trades > 0 else 0.0
-        total_pnl = round(df_bt["RawPnL"].sum(), 2)
-
-        st.markdown("#### 📈 Backtest Performance Summary")
-        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-        col_m1.metric("Total Stocks Checked", total_trades)
-        col_m2.metric("Valid Entries Allowed", allowed_trades)
-        col_m3.metric("Win Rate", f"{win_rate}%")
-        col_m4.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
-        col_m5.metric("Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}")
-        st.markdown("---")
-
-        render_native_table(df_bt, key_prefix="backtest")
     else:
-        st.info("Select date, time filter, direction option, and click the button above to run backtesting.")
+        st.markdown("### 🗓️ Weekly & Swing Strategy Engine")
+        selected_weekly_strategy = st.selectbox(
+            "Choose Weekly / Swing Strategy:",
+            [
+                "Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)",
+                "Vijay Thakkar Multiyear Breakout & Demand Retest Strategy (Cup & Handle)",
+                "Daily Momentum Strategy (MACD Crossover + VWAP + RSI > 55)",
+                "Elite Swing Strategy (MTF Trend Pullback & Dip Buy)",
+                "HTML Weekly Swing Base Strategy (New HTML Strategy)"
+            ]
+        )
+        
+        st.markdown(f"Selected: **{selected_weekly_strategy}** over Top {universe_limit} Nifty Universe.")
 
-# --- TAB 3: WEEKLY & SWING STRATEGY HUB & BACKTESTER ---
-with main_tab3:
-    st.subheader("🗓️ Weekly & Swing Strategy Hub & Backtester")
-    strat_mode = st.radio("Select Mode:", ["Live Strategy Scanner", "Weekly / Swing Backtester"], horizontal=True)
-    
-    selected_strategy = st.selectbox(
-        "Choose Weekly / Swing Strategy:",
-        [
-            "Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)",
-            "Vijay Thakkar Multiyear Breakout & Demand Retest Strategy (Cup & Handle)",
-            "Daily Momentum Strategy (MACD Crossover + VWAP + RSI > 55)",
-            "Elite Swing Strategy (MTF Trend Pullback & Dip Buy)",
-            "HTML Weekly Swing Base Strategy (New HTML Strategy)"
-        ]
-    )
-
-    if strat_mode == "Live Strategy Scanner":
-        if st.button("🚀 Run Selected Strategy Scan", type="primary", use_container_width=True):
-            with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_strategy}..."):
-                if "Weekly Higher-Timeframe" in selected_strategy:
+        if st.button("🚀 Run Weekly / Swing Scan", type="primary", use_container_width=True):
+            with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_weekly_strategy}..."):
+                if "Weekly Higher-Timeframe" in selected_weekly_strategy:
                     df_res = fetch_weekly_mtf_strategy(active_universe_pool, selected_count)
-                elif "Vijay Thakkar" in selected_strategy:
+                elif "Vijay Thakkar" in selected_weekly_strategy:
                     df_res = fetch_vijay_thakkar_strategy(active_universe_pool, selected_count)
-                elif "Daily Momentum" in selected_strategy:
+                elif "Daily Momentum" in selected_weekly_strategy:
                     df_res = fetch_daily_momentum_strategy(active_universe_pool, selected_count)
-                elif "Elite Swing" in selected_strategy:
+                elif "Elite Swing" in selected_weekly_strategy:
                     df_res = fetch_elite_swing_strategy(active_universe_pool, selected_count)
                 else:
                     df_res = fetch_html_weekly_strategy(active_universe_pool, selected_count)
@@ -1342,12 +1233,87 @@ with main_tab3:
             render_native_table(st.session_state["df_dropdown_strategy"].head(selected_count), key_prefix="dropdown_strategy_tab")
         else:
             st.info("Select a strategy above and click the button to view live signals.")
-            
+
+
+# --- TAB 2: BACKTESTERS HUB (RADIO BUTTON TOGGLE) ---
+with main_tab2:
+    st.subheader("📊 Strategy Backtesters Hub")
+    
+    backtest_type = st.radio(
+        "Select Backtester Category:",
+        ["Intraday Backtester", "Weekly / Swing Backtester"],
+        horizontal=True
+    )
+    
+    st.markdown("---")
+    
+    if backtest_type == "Intraday Backtester":
+        st.markdown("### ⏱️ Intraday Session Backtester")
+        col_bt1, col_bt2, col_bt3 = st.columns(3)
+        with col_bt1:
+            backtest_date = st.date_input(
+                "📅 Select Backtest Session Date",
+                value=datetime.today().date() - timedelta(days=1),
+            )
+        with col_bt2:
+            backtest_time = st.time_input(
+                "⏱️ Select Entry Check Time",
+                value=time(9, 30),
+                step=300
+            )
+        with col_bt3:
+            direction_filter = st.selectbox(
+                "⇄ Intraday Stock Direction Option",
+                ["All (Buy & Sell)", "Buy (Long Only)", "Sell (Short Only)"]
+            )
+
+        if st.button("🚀 Run Intraday Backtest", type="primary"):
+            with st.spinner(f"Validating entries at {backtest_time.strftime('%H:%M')} over Top {universe_limit} Nifty candles..."):
+                df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count, active_universe_pool, backtest_time, direction_filter)
+                st.session_state["df_bt_results"] = df_bt
+
+        if "df_bt_results" in st.session_state and not st.session_state["df_bt_results"].empty:
+            df_bt = st.session_state["df_bt_results"].head(selected_count)
+
+            total_trades = len(df_bt)
+            allowed_trades = len(df_bt[df_bt["Entry Status"].str.contains("Allowed", na=False)])
+            t1_hits = len(df_bt[df_bt["Status"].str.contains("Target 1", na=False)])
+            t2_hits = len(df_bt[df_bt["Status"].str.contains("Target 2", na=False)])
+            sl_hits = len(df_bt[df_bt["Status"].str.contains("SL Hit", na=False)])
+            wins = t1_hits + t2_hits
+            win_rate = round((wins / allowed_trades) * 100, 2) if allowed_trades > 0 else 0.0
+            total_pnl = round(df_bt["RawPnL"].sum(), 2)
+
+            st.markdown("#### 📈 Backtest Performance Summary")
+            col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+            col_m1.metric("Total Stocks Checked", total_trades)
+            col_m2.metric("Valid Entries Allowed", allowed_trades)
+            col_m3.metric("Win Rate", f"{win_rate}%")
+            col_m4.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
+            col_m5.metric("Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}")
+            st.markdown("---")
+
+            render_native_table(df_bt, key_prefix="backtest")
+        else:
+            st.info("Select date, time filter, direction option, and click the button above to run backtesting.")
+
     else:
+        st.markdown("### 📅 Weekly / Swing Historical Backtester")
         bt_weekly_date = st.date_input("📅 Select Historical Weekly Entry Date", value=datetime.today().date() - timedelta(days=90))
+        selected_weekly_strat_bt = st.selectbox(
+            "Choose Strategy to Backtest:",
+            [
+                "Weekly Higher-Timeframe MTF Strategy",
+                "Vijay Thakkar Breakout Strategy",
+                "Daily Momentum Strategy",
+                "Elite Swing Strategy",
+                "HTML Weekly Swing Base Strategy"
+            ]
+        )
+        
         if st.button("🚀 Run Weekly Strategy Backtest", type="primary", use_container_width=True):
             with st.spinner("Backtesting weekly historical setups over subsequent 1-4 weeks..."):
-                df_wk_bt = run_weekly_backtest(bt_weekly_date, selected_strategy, selected_count, active_universe_pool)
+                df_wk_bt = run_weekly_backtest(bt_weekly_date, selected_weekly_strat_bt, selected_count, active_universe_pool)
                 st.session_state["df_weekly_bt_results"] = df_wk_bt
 
         if "df_weekly_bt_results" in st.session_state and not st.session_state["df_weekly_bt_results"].empty:
@@ -1366,7 +1332,8 @@ with main_tab3:
         else:
             st.info("Select a historical date and run the backtest to view weekly performance metrics.")
 
-# --- TAB 4: HTML SCANNER & LIVE CHAT HUB ---
+
+# --- TAB 3: HTML SCANNER & LIVE CHAT HUB ---
 @st.cache_data(ttl=300)
 def fetch_html_integrated_scanner_data(symbols):
     intraday_default = [
@@ -1434,11 +1401,11 @@ def fetch_html_integrated_scanner_data(symbols):
             
     return pd.DataFrame(intra_res), pd.DataFrame(weekly_res)
 
-with main_tab4:
+with main_tab3:
     st.subheader("🎯 HTML Scanner Hub & Live Strategy Chat")
     st.markdown("Integrated directly from your pre-breakout HTML dashboard with live market pricing, watch zones, stop losses, and target outlooks.")
     
-    html_tab_choice = st.radio("Select View:", ["⚡ Intraday Pre-Market Prep Hub", "📅 Weekly Swing Bases Hub", "💬 Live Strategy Chat Assistant"], horizontal=True)
+    html_tab_choice = st.radio("Select View:", ["⚡ Intraday Pre-Market Prep Hub", "📅 Weekly Swing Bases Hub", "💬 Live Strategy Chat Assistant"], horizontal=True, key="html_radio")
     
     df_html_intra, df_html_weekly = fetch_html_integrated_scanner_data(active_universe_pool)
     
@@ -1488,6 +1455,16 @@ with main_tab4:
             st.session_state["chat_history"].append({"role": "assistant", "content": bot_reply})
             with st.chat_message("assistant"):
                 st.markdown(bot_reply)
+
+# --- TAB 4: TERMINAL INFO & GUIDE ---
+with main_tab4:
+    st.subheader("📌 Terminal Guidelines & Summary")
+    st.markdown("""
+    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Chartlink & HTML pre-market) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing).
+    - **Tab 2 (Backtesters Hub):** Use the radio button to switch between the **Intraday Session Backtester** and the **Weekly / Swing Historical Backtester**.
+    - **Tab 3 (HTML Scanner & Live Chat Hub):** Direct integration of HTML dashboard scans and interactive AI trading assistant.
+    - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
+    """)
 
 st.markdown("---")
 st.markdown("📌 *All institutional strategies, rolling breakout checks, GTF MTF rules, Vijay Thakkar breakout criteria, and HTML scanner conditions remain fully intact.*")
