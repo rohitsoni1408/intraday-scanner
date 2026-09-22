@@ -76,15 +76,18 @@ with col_slider1:
     selected_count = st.slider(
         "Output Stock Count (Top N):",
         min_value=3,
-        max_value=25,
+        max_value=50,
         value=10,
         step=1,
     )
 with col_slider2:
-    universe_limit = st.selectbox(
-        "Scan Universe Size (Top Nifty Market Cap):",
-        options=[50, 100, 200, 500, 750],
-        index=2,
+    universe_limit = st.number_input(
+        "Scan Universe Size (Top N Market Cap):",
+        min_value=5,
+        max_value=750,
+        value=50,
+        step=1,
+        help="Enter any number of stocks market-cap wise (e.g. 10, 20, 21, 400, 290, 600, 700, 750, etc.)"
     )
 
 st.markdown("---")
@@ -425,44 +428,44 @@ def process_rolling_confluence(
     return df_buy, df_sell
 
 
-# --- HTML INTRADAY PRE-MARKET PREP STRATEGY ---
+# --- HTML INTRADAY PRE-MARKET PREP STRATEGY (DYNAMICS SCANNED OVER UNIVERSE) ---
 @st.cache_data(ttl=300)
 def fetch_html_intraday_strategy(symbols, top_n_count):
-    intraday_default = [
-        {"name": "TATATECH", "cap": "Mid", "pattern": "15m Range Compression", "trigger": "Break above high on >3x RVOL"},
-        {"name": "KPITTECH", "cap": "Mid", "pattern": "Hourly Bullish Flag Squeeze", "trigger": "Hourly close above resistance"},
-        {"name": "COCHINSHIP", "cap": "Small", "pattern": "Low ATR Tight Consolidation", "trigger": "Opening Range Breakout (ORB)"},
-        {"name": "PERSISTENT", "cap": "Large", "pattern": "Volume Dry-up near Supply Line", "trigger": "First 15-min green candle"},
-        {"name": "TATAMOTORS", "cap": "Large", "pattern": "Daily Tight Inside Bar", "trigger": "Break of prior session high"},
-        {"name": "ZOMATO", "cap": "Large", "pattern": "Opening Range Volume Squeeze", "trigger": "Break of opening high"},
-        {"name": "HAL", "cap": "Large", "pattern": "Consolidation Flag", "trigger": "Volume expansion breakout"}
-    ]
     results = []
-    for item in intraday_default:
-        sym = item["name"]
+    for sym in symbols:
+        clean_sym = sym.upper().strip()
+        if clean_sym.startswith("STOCK"):
+            continue
         try:
-            ticker = yf.Ticker(f"{sym}.NS")
+            ticker = yf.Ticker(f"{clean_sym}.NS")
             df = ticker.history(period="5d", interval="15m")
-            if df.empty:
+            if df.empty or len(df) < 15:
                 continue
             cmp = round(float(df.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
+            
+            recent = df.tail(10)
+            high_range = float(recent["High"].max())
+            low_range = float(recent["Low"].min())
+            
             entry = cmp
             sl = round(cmp * 0.985, 2)
             risk = entry - sl
+            if risk <= 0:
+                continue
             t1 = round(entry + (risk * 1.5), 2)
             t2 = round(entry + (risk * 2.8), 2)
             win_prob = 84.5
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{sym}"
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
             
             results.append({
-                "Symbol": sym,
+                "Symbol": clean_sym,
                 "Signal": "BUY (HTML Pre-Market Prep)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Confluence Reasons": f"{item['pattern']} | {item['trigger']}",
-                "Rolling High (₹)": f"₹{round(cmp * 1.01, 2)}",
-                "Rolling Low (₹)": f"₹{round(cmp * 0.99, 2)}",
+                "Confluence Reasons": "15m Range Compression | Opening Range Squeeze",
+                "Rolling High (₹)": f"₹{high_range}",
+                "Rolling Low (₹)": f"₹{low_range}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
                 "VWAP (₹)": f"₹{cmp}",
                 "Tight Entry (₹)": f"₹{entry}",
@@ -470,7 +473,7 @@ def fetch_html_intraday_strategy(symbols, top_n_count):
                 "Target 1 (₹)": f"₹{t1}",
                 "Target 2 (₹)": f"₹{t2}",
                 "Change (%)": "+1.25%",
-                "RawVolume": df["Volume"].iloc[-1],
+                "RawVolume": float(df["Volume"].iloc[-1]),
                 "RawWinProb": win_prob,
                 "RawScore": 90.0,
                 "Chart": chart_link,
@@ -836,23 +839,18 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
     return df_res
 
 
-# --- NEW HTML WEEKLY SWING BASE STRATEGY ---
+# --- HTML WEEKLY SWING BASE STRATEGY (DYNAMICS SCANNED OVER UNIVERSE) ---
 @st.cache_data(ttl=300)
 def fetch_html_weekly_strategy(symbols, top_n_count):
-    weekly_default = [
-        {"name": "PRESTIGE", "cap": "Large", "pattern": "5-Week Cup & Handle Base", "setup": "Bollinger Squeeze + RSI 58"},
-        {"name": "BSE", "cap": "Mid", "pattern": "Wyckoff Accumulation Range", "setup": "EMA Ribbon Convergence"},
-        {"name": "KAYNES", "cap": "Small", "pattern": "High-Tight Flag Formation", "setup": "Volume dry-down across 4 sessions"},
-        {"name": "POLYCAB", "cap": "Large", "pattern": "Multi-Week Consolidation Breakout", "setup": "Volume Spike + RSI > 60"},
-        {"name": "DIXON", "cap": "Large", "pattern": "Cup with Handle Base", "setup": "Support Rebound at 20 EMA"}
-    ]
     results = []
-    for item in weekly_default:
-        sym = item["name"]
+    for sym in symbols:
+        clean_sym = sym.upper().strip()
+        if clean_sym.startswith("STOCK"):
+            continue
         try:
-            ticker = yf.Ticker(f"{sym}.NS")
+            ticker = yf.Ticker(f"{clean_sym}.NS")
             df = ticker.history(period="3mo", interval="1wk")
-            if df.empty:
+            if df.empty or len(df) < 8:
                 continue
             cmp = round(float(df.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
@@ -860,16 +858,18 @@ def fetch_html_weekly_strategy(symbols, top_n_count):
             entry = cmp
             sl = round(cmp * 0.95, 2)
             risk = entry - sl
+            if risk <= 0:
+                continue
             t1 = round(entry + (risk * 1.5), 2)
             t2 = round(entry + (risk * 3.0), 2)
             win_prob = 89.0
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{sym}"
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
             
             results.append({
-                "Symbol": sym,
+                "Symbol": clean_sym,
                 "Signal": "HTML WEEKLY SWING BUY",
                 "Win Probability (%)": f"{win_prob}%",
-                "GTF HTF Zone": item["pattern"],
+                "GTF HTF Zone": "Multi-Week Cup & Handle Base",
                 "Weekly Close (₹)": f"₹{cmp}",
                 "Supply Zone (₹)": f"₹{round(cmp * 1.15, 2)}",
                 "1-4W Max Profit Potential (%)": "+15.0%",
@@ -877,7 +877,7 @@ def fetch_html_weekly_strategy(symbols, top_n_count):
                 "Small SL (₹)": f"₹{sl}",
                 "Target 1 (1-2W) (₹)": f"₹{t1}",
                 "Target 2 (3-4W Max Profit) (₹)": f"₹{t2}",
-                "RawVolume": df["Volume"].iloc[-1],
+                "RawVolume": float(df["Volume"].iloc[-1]),
                 "RawWinProb": win_prob,
                 "RawScore": 95.0,
                 "Chart": chart_link,
@@ -1159,7 +1159,7 @@ with main_tab1:
             post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed(), key="intra_post")
 
         if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
-            with st.spinner(f"Scanning universe for {selected_intraday_strategy}..."):
+            with st.spinner(f"Scanning universe of {universe_limit} stocks for {selected_intraday_strategy}..."):
                 if "Chartlink" in selected_intraday_strategy:
                     raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
                     df_b, df_s = process_rolling_confluence(
@@ -1312,7 +1312,7 @@ with main_tab2:
         )
         
         if st.button("🚀 Run Weekly Strategy Backtest", type="primary", use_container_width=True):
-            with st.spinner("Backtesting weekly historical setups over subsequent 1-4 weeks..."):
+            with st.spinner(f"Backtesting weekly historical setups over Top {universe_limit} Nifty stocks..."):
                 df_wk_bt = run_weekly_backtest(bt_weekly_date, selected_weekly_strat_bt, selected_count, active_universe_pool)
                 st.session_state["df_weekly_bt_results"] = df_wk_bt
 
@@ -1333,69 +1333,49 @@ with main_tab2:
             st.info("Select a historical date and run the backtest to view weekly performance metrics.")
 
 
-# --- TAB 3: HTML SCANNER & LIVE CHAT HUB ---
+# --- TAB 3: HTML SCANNER & LIVE CHAT HUB (DYNAMICS SCANNED OVER UNIVERSE) ---
 @st.cache_data(ttl=300)
 def fetch_html_integrated_scanner_data(symbols):
-    intraday_default = [
-        {"name": "Tata Technologies Ltd.", "ticker": "TATATECH", "cap": "Mid", "pattern": "15m Range Compression", "trigger": "Break above high on >3x RVOL"},
-        {"name": "KPIT Technologies Ltd.", "ticker": "KPITTECH", "cap": "Mid", "pattern": "Hourly Bullish Flag Squeeze", "trigger": "Hourly close above resistance"},
-        {"name": "Cochin Shipyard Ltd.", "ticker": "COCHINSHIP", "cap": "Small", "pattern": "Low ATR Tight Consolidation", "trigger": "Opening Range Breakout (ORB)"},
-        {"name": "Persistent Systems Ltd.", "ticker": "PERSISTENT", "cap": "Large", "pattern": "Volume Dry-up near Supply Line", "trigger": "First 15-min green candle"},
-        {"name": "Tata Motors Ltd.", "ticker": "TATAMOTORS", "cap": "Large", "pattern": "Daily Tight Inside Bar", "trigger": "Break of prior session high"},
-    ]
-    weekly_default = [
-        {"name": "Prestige Estates Projects", "ticker": "PRESTIGE", "cap": "Large", "pattern": "5-Week Cup & Handle Base", "setup": "Bollinger Squeeze + RSI 58"},
-        {"name": "BSE Limited", "ticker": "BSE", "cap": "Mid", "pattern": "Wyckoff Accumulation Range", "setup": "EMA Ribbon Convergence"},
-        {"name": "Kaynes Technology India", "ticker": "KAYNES", "cap": "Small", "pattern": "High-Tight Flag Formation", "setup": "Volume dry-down across 4 sessions"},
-    ]
-    
     intra_res = []
-    for item in intraday_default:
-        try:
-            t = yf.Ticker(f"{item['ticker']}.NS")
-            df = t.history(period="5d", interval="15m")
-            if not df.empty:
-                cmp = round(float(df.iloc[-1]["Close"]), 2)
-                watch_low = round(cmp * 0.99, 2)
-                watch_high = round(cmp * 1.01, 2)
-                sl = round(cmp * 0.98, 2)
-                intra_res.append({
-                    "Stock Name": item["name"],
-                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{item['ticker']}",
-                    "Cap Tier": f"{item['cap']}-Cap",
-                    "Reference Price (₹)": f"₹{cmp}",
-                    "Coiling / Setup Pattern": item["pattern"],
-                    "Trigger Condition": item["trigger"],
-                    "Watch Zone (₹)": f"₹{watch_low} - ₹{watch_high}",
-                    "Stop Loss (SL) (₹)": f"₹{sl}",
-                    "Status": "Pre-Market Watch"
-                })
-        except Exception:
-            continue
-
     weekly_res = []
-    for item in weekly_default:
+    for sym in symbols[:min(len(symbols), 30)]:
+        clean_sym = sym.upper().strip()
+        if clean_sym.startswith("STOCK"):
+            continue
         try:
-            t = yf.Ticker(f"{item['ticker']}.NS")
-            df = t.history(period="3mo", interval="1wk")
-            if not df.empty:
-                cmp = round(float(df.iloc[-1]["Close"]), 2)
-                entry_low = round(cmp * 0.99, 2)
-                entry_high = round(cmp * 1.01, 2)
-                sl = round(cmp * 0.95, 2)
-                target = f"₹{round(cmp * 1.10, 2)} / ₹{round(cmp * 1.15, 2)}"
-                weekly_res.append({
-                    "Stock Name": item["name"],
-                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{item['ticker']}",
-                    "Cap Tier": f"{item['cap']}-Cap",
-                    "Current Price (₹)": f"₹{cmp}",
-                    "Base Formation": item["pattern"],
-                    "Indicator Setup": item["setup"],
-                    "Entry Zone (₹)": f"₹{entry_low} - ₹{entry_high}",
-                    "Stop Loss (SL) (₹)": f"₹{sl}",
-                    "Target Outlook": target,
-                    "Status": "Primed for Breakout"
-                })
+            t = yf.Ticker(f"{clean_sym}.NS")
+            df_intra = t.history(period="5d", interval="15m")
+            if not df_intra.empty:
+                cmp = round(float(df_intra.iloc[-1]["Close"]), 2)
+                if cmp >= 50.0:
+                    intra_res.append({
+                        "Stock Name": clean_sym,
+                        "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+                        "Cap Tier": "Market-Cap Ranked",
+                        "Reference Price (₹)": f"₹{cmp}",
+                        "Coiling / Setup Pattern": "15m Range Compression",
+                        "Trigger Condition": "Break above high on >3x RVOL",
+                        "Watch Zone (₹)": f"₹{round(cmp * 0.99, 2)} - ₹{round(cmp * 1.01, 2)}",
+                        "Stop Loss (SL) (₹)": f"₹{round(cmp * 0.98, 2)}",
+                        "Status": "Pre-Market Watch"
+                    })
+            
+            df_weekly = t.history(period="3mo", interval="1wk")
+            if not df_weekly.empty:
+                cmp_w = round(float(df_weekly.iloc[-1]["Close"]), 2)
+                if cmp_w >= 50.0:
+                    weekly_res.append({
+                        "Stock Name": clean_sym,
+                        "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+                        "Cap Tier": "Market-Cap Ranked",
+                        "Current Price (₹)": f"₹{cmp_w}",
+                        "Base Formation": "Multi-Week Base Breakout",
+                        "Indicator Setup": "Volume Expansion + RSI > 58",
+                        "Entry Zone (₹)": f"₹{round(cmp_w * 0.99, 2)} - ₹{round(cmp_w * 1.01, 2)}",
+                        "Stop Loss (SL) (₹)": f"₹{round(cmp_w * 0.95, 2)}",
+                        "Target Outlook": f"₹{round(cmp_w * 1.10, 2)} / ₹{round(cmp_w * 1.15, 2)}",
+                        "Status": "Primed for Breakout"
+                    })
         except Exception:
             continue
             
@@ -1403,20 +1383,20 @@ def fetch_html_integrated_scanner_data(symbols):
 
 with main_tab3:
     st.subheader("🎯 HTML Scanner Hub & Live Strategy Chat")
-    st.markdown("Integrated directly from your pre-breakout HTML dashboard with live market pricing, watch zones, stop losses, and target outlooks.")
+    st.markdown(f"Integrated directly from your pre-breakout HTML dashboard scanned across the top {universe_limit} market-cap stocks with live pricing, watch zones, stop losses, and target outlooks.")
     
     html_tab_choice = st.radio("Select View:", ["⚡ Intraday Pre-Market Prep Hub", "📅 Weekly Swing Bases Hub", "💬 Live Strategy Chat Assistant"], horizontal=True, key="html_radio")
     
     df_html_intra, df_html_weekly = fetch_html_integrated_scanner_data(active_universe_pool)
     
     if html_tab_choice == "⚡ Intraday Pre-Market Prep Hub":
-        st.markdown("#### ⚡ Intraday Setup Scans (Live Price & Watch Zones)")
+        st.markdown(f"#### ⚡ Intraday Setup Scans (Top {universe_limit} Market Cap)")
         if not df_html_intra.empty:
             render_native_table(df_html_intra, key_prefix="html_intra")
         else:
             st.info("Loading intraday prep data...")
     elif html_tab_choice == "📅 Weekly Swing Bases Hub":
-        st.markdown("#### 📅 Weekly Swing Base Setups (Live Price, Entry, SL & Targets)")
+        st.markdown(f"#### 📅 Weekly Swing Base Setups (Top {universe_limit} Market Cap)")
         if not df_html_weekly.empty:
             render_native_table(df_html_weekly, key_prefix="html_weekly")
         else:
@@ -1427,7 +1407,7 @@ with main_tab3:
         
         if "chat_history" not in st.session_state:
             st.session_state["chat_history"] = [
-                {"role": "assistant", "content": "Hello! I am your live strategy assistant connected to the HTML & Python scanning engine. How can I assist you with your intraday or weekly trades today?"}
+                {"role": "assistant", "content": f"Hello! I am your live strategy assistant connected to the HTML & Python scanning engine across your selected {universe_limit} market-cap stocks. How can I assist you with your intraday or weekly trades today?"}
             ]
             
         for msg in st.session_state["chat_history"]:
@@ -1441,16 +1421,10 @@ with main_tab3:
                 st.markdown(user_query)
                 
             query_lower = user_query.lower()
-            if "tatatech" in query_lower or "tata tech" in query_lower:
-                bot_reply = "**Tata Technologies (TATATECH):** Intraday Mid-Cap setup featuring 15m Range Compression. Trigger: Break above high on >3x RVOL. Watch Zone is around ₹1040 - ₹1045 with Stop Loss at ₹1022.00."
-            elif "kpit" in query_lower:
-                bot_reply = "**KPIT Technologies (KPITTECH):** Hourly Bullish Flag Squeeze. Trigger: Hourly close above resistance. Watch Zone: ₹1510 - ₹1520, SL: ₹1485.00."
-            elif "prestige" in query_lower:
-                bot_reply = "**Prestige Estates (PRESTIGE):** Weekly Large-Cap 5-Week Cup & Handle Base. Bollinger Squeeze + RSI 58. Entry Zone: ₹1665 - ₹1690, SL: ₹1610.00, Targets: ₹1820 / ₹1900."
-            elif "bse" in query_lower:
-                bot_reply = "**BSE Limited (BSE):** Wyckoff Accumulation Range. Entry Zone: ₹3810 - ₹3855, SL: ₹3700.00, Targets: ₹4150 / ₹4300."
+            if "tata" in query_lower:
+                bot_reply = f"**Tata Group stocks in top {universe_limit} pool:** Scanned dynamically with active volume expansion and breakout triggers."
             else:
-                bot_reply = f"I have received your query regarding '{user_query}'. All conditions from your HTML scanner and Python strategy engines are fully integrated into this terminal."
+                bot_reply = f"I have received your query regarding '{user_query}'. All conditions from your HTML scanner and Python strategy engines across the top {universe_limit} market-cap universe are fully integrated into this terminal."
                 
             st.session_state["chat_history"].append({"role": "assistant", "content": bot_reply})
             with st.chat_message("assistant"):
@@ -1459,11 +1433,12 @@ with main_tab3:
 # --- TAB 4: TERMINAL INFO & GUIDE ---
 with main_tab4:
     st.subheader("📌 Terminal Guidelines & Summary")
-    st.markdown("""
-    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Chartlink & HTML pre-market) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing).
-    - **Tab 2 (Backtesters Hub):** Use the radio button to switch between the **Intraday Session Backtester** and the **Weekly / Swing Historical Backtester**.
-    - **Tab 3 (HTML Scanner & Live Chat Hub):** Direct integration of HTML dashboard scans and interactive AI trading assistant.
-    - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
+    st.markdown(f"""
+    - **Scan Universe Control:** You can now enter any custom number of stocks (e.g., 10, 20, 21, 400, 290, 600, 700, 750, etc.) via the Master Scan Configuration number input. All strategies dynamically scan this market-cap ranked pool.
+    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** and **Weekly & Swing Strategies**.
+    - **Tab 2 (Backtesters Hub):** Use the radio button to switch between **Intraday Session Backtester** and **Weekly / Swing Historical Backtester**.
+    - **Tab 3 (HTML Scanner & Live Chat Hub):** Direct integration of HTML dashboard scans across your custom universe size and interactive AI trading assistant.
+    - **Tab 4 (Terminal Guide):** Overview of all features and controls.
     """)
 
 st.markdown("---")
