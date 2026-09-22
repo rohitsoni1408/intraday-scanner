@@ -89,6 +89,10 @@ with col_slider2:
 
 st.markdown("---")
 
+# Initialize Strategy Scan Storage in Session State
+if "strategy_scans" not in st.session_state:
+    st.session_state["strategy_scans"] = {}
+
 # --- CONSOLIDATED 4-TAB LAYOUT ---
 main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "📈 Live Strategies Hub",
@@ -1168,16 +1172,13 @@ with main_tab1:
                 else:
                     df_b, df_s = fetch_html_intraday_strategy(active_universe_pool, selected_count)
 
-                st.session_state["df_b_master"] = df_b
-                st.session_state["df_s_master"] = df_s
+                # Save specific strategy scan state
+                st.session_state["strategy_scans"][selected_intraday_strategy] = (df_b, df_s)
                 st.success("Intraday scan completed successfully!")
 
-        if "df_b_master" not in st.session_state:
-            empty_b, empty_s = process_rolling_confluence(
-                [], selected_count, active_universe_pool, force_post_market=is_market_closed()
-            )
-            st.session_state["df_b_master"] = empty_b
-            st.session_state["df_s_master"] = empty_s
+        # Retrieve saved scans for the currently selected strategy
+        cached_intra_scan = st.session_state["strategy_scans"].get(selected_intraday_strategy, (pd.DataFrame(), pd.DataFrame()))
+        df_b, df_s = cached_intra_scan
 
         sub_tab_buy, sub_tab_sell = st.tabs([
             f"🟢 Top {selected_count} Long Setups",
@@ -1185,16 +1186,14 @@ with main_tab1:
         ])
 
         with sub_tab_buy:
-            df_b = st.session_state["df_b_master"]
             if not df_b.empty:
-                render_native_table(df_b.head(selected_count), key_prefix="intra_buy")
+                render_native_table(df_b.head(selected_count), key_prefix=f"intra_buy_{selected_intraday_strategy}")
             else:
-                st.info("Click 'Run Intraday Scan' to view intraday setups.")
+                st.info("Click 'Run Intraday Scan' to view intraday setups for this strategy.")
 
         with sub_tab_sell:
-            df_s = st.session_state["df_s_master"]
             if not df_s.empty:
-                render_native_table(df_s.head(selected_count), key_prefix="intra_sell")
+                render_native_table(df_s.head(selected_count), key_prefix=f"intra_sell_{selected_intraday_strategy}")
             else:
                 st.info("No short setups found or click scan to update.")
 
@@ -1226,11 +1225,14 @@ with main_tab1:
                 else:
                     df_res = fetch_html_weekly_strategy(active_universe_pool, selected_count)
 
-                st.session_state["df_dropdown_strategy"] = df_res
+                # Save specific strategy scan state
+                st.session_state["strategy_scans"][selected_weekly_strategy] = df_res
                 st.success("Scan completed successfully!")
 
-        if "df_dropdown_strategy" in st.session_state and not st.session_state["df_dropdown_strategy"].empty:
-            render_native_table(st.session_state["df_dropdown_strategy"].head(selected_count), key_prefix="dropdown_strategy_tab")
+        # Retrieve saved scan results for the currently selected strategy
+        df_weekly_res = st.session_state["strategy_scans"].get(selected_weekly_strategy, pd.DataFrame())
+        if not df_weekly_res.empty:
+            render_native_table(df_weekly_res.head(selected_count), key_prefix=f"strategy_tab_{selected_weekly_strategy}")
         else:
             st.info("Select a strategy above and click the button to view live signals.")
 
@@ -1460,7 +1462,7 @@ with main_tab3:
 with main_tab4:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
-    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Chartlink & HTML pre-market) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing).
+    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Chartlink & HTML pre-market) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing). Scan results are independently cached per strategy until a new scan is triggered.
     - **Tab 2 (Backtesters Hub):** Use the radio button to switch between the **Intraday Session Backtester** and the **Weekly / Swing Historical Backtester**.
     - **Tab 3 (HTML Scanner & Live Chat Hub):** Direct integration of HTML dashboard scans and interactive AI trading assistant.
     - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
