@@ -1,0 +1,43 @@
+name: Full 750 NSE Strategy Alerts
+
+on:
+  schedule:
+    # Run intraday scan every 30 mins during trading hours (Mon-Fri) -> 03:45 - 10:00 UTC
+    - cron: '*/30 3-10 * * 1-5'
+    # Run weekly scan every day at 8:30 AM IST -> 03:00 UTC
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas yfinance requests
+
+      - name: Run Full Pool Scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          HOUR_UTC=$(date -u +%H)
+          MINUTE_UTC=$(date -u +%M)
+          
+          if [ "$HOUR_UTC" = "03" ] && [ "$MINUTE_UTC" = "30" ]; then
+            echo "Executing Weekly Scan on 750 Stocks..."
+            python telegram_alert.py --mode weekly
+          else
+            echo "Executing Intraday Scan on 750 Stocks..."
+            python telegram_alert.py --mode intraday
+          fi
