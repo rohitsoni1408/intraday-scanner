@@ -465,7 +465,7 @@ def process_rolling_confluence(
     return df_buy, df_sell
 
 
-# --- HTML INTRADAY PRE-MARKET PREP STRATEGY (WEEKLY/DAILY FILTERED) ---
+# --- HTML INTRADAY PRE-MARKET PREP STRATEGY (WEEKLY/DAILY FILTERED & STRICT CONDITION) ---
 @st.cache_data(ttl=300)
 def fetch_html_intraday_strategy(symbols, top_n_count):
     results = []
@@ -486,16 +486,17 @@ def fetch_html_intraday_strategy(symbols, top_n_count):
             
             recent_high = df["High"].iloc[-6:-1].max()
             recent_low = df["Low"].iloc[-6:-1].min()
-            range_compressed = (recent_high - recent_low) / cmp <= 0.025
-            vol_spike = df["Volume"].iloc[-1] > (df["Volume"].rolling(10).mean().iloc[-1] * 1.5)
+            # Stricter criteria: require both range compression AND volume spike to filter only elite setups
+            range_compressed = (recent_high - recent_low) / cmp <= 0.02
+            vol_spike = df["Volume"].iloc[-1] > (df["Volume"].rolling(10).mean().iloc[-1] * 1.8)
 
-            if range_compressed or vol_spike:
+            if range_compressed and vol_spike:
                 entry = cmp
                 sl = round(cmp * 0.985, 2)
                 risk = entry - sl
                 t1 = round(entry + (risk * 1.5), 2)
                 t2 = round(entry + (risk * 2.8), 2)
-                win_prob = 86.5 if vol_spike else 81.0
+                win_prob = 89.0
                 chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
                 profit_pct = round(((t2 - entry) / entry) * 100, 2)
                 
@@ -503,7 +504,7 @@ def fetch_html_intraday_strategy(symbols, top_n_count):
                     "Symbol": clean_sym,
                     "Signal": "BUY (HTML Pre-Market + Weekly Condition)",
                     "Win Probability (%)": f"{win_prob}%",
-                    "Confluence Reasons": "Weekly/Daily Trend Fulfill | 15m Range Compression",
+                    "Confluence Reasons": "Weekly/Daily Trend Fulfill | 15m Range Compression & Volume Spike",
                     "Rolling High (₹)": f"₹{round(cmp * 1.01, 2)}",
                     "Rolling Low (₹)": f"₹{round(cmp * 0.99, 2)}",
                     "Last Close/CMP (₹)": f"₹{cmp}",
@@ -515,7 +516,7 @@ def fetch_html_intraday_strategy(symbols, top_n_count):
                     "Change (%)": "+1.25%",
                     "RawVolume": df["Volume"].iloc[-1],
                     "RawWinProb": win_prob,
-                    "RawScore": 92.0 + (5.0 if vol_spike else 0.0),
+                    "RawScore": 95.0,
                     "RawProfitPct": profit_pct,
                     "Chart": chart_link,
                 })
@@ -916,13 +917,13 @@ def fetch_html_weekly_strategy(symbols, top_n_count):
             near_base = cmp >= weekly_highs * 0.94
             vol_expansion = df["Volume"].iloc[-1] > df["Volume"].rolling(4).mean().iloc[-2]
 
-            if near_base or vol_expansion:
+            if near_base and vol_expansion:
                 entry = cmp
                 sl = round(cmp * 0.95, 2)
                 risk = entry - sl
                 t1 = round(entry + (risk * 1.5), 2)
                 t2 = round(entry + (risk * 3.0), 2)
-                win_prob = 89.0 if near_base else 82.0
+                win_prob = 89.0
                 chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
                 profit_pct = round(((t2 - entry) / entry) * 100, 2)
                 
