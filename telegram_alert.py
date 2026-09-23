@@ -51,22 +51,15 @@ def save_sent_state(state):
         print(f"Failed to save state: {e}")
 
 def get_nifty_750_pool():
-    """
-    Returns the comprehensive pool of NSE stocks (Top 750 universe).
-    You can expand or link this to your custom stock ticker list.
-    """
-    # Example representation for top NSE liquid tickers. 
-    # Replace or extend with your complete list of 750 NSE symbols ending with '.NS'
+    """Returns the comprehensive pool of NSE stocks (Top 750 universe)."""
     try:
         url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
-        # Fallback or direct load logic if using local CSV/dynamic fetch
         df = pd.read_csv(url)
         symbols = [str(sym).strip() + ".NS" for sym in df['Symbol'].tolist()]
         return symbols[:750]
     except Exception:
         # Fallback sample list if network fetch fails
-        sample_stocks = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS"]
-        return sample_stocks
+        return ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS"]
 
 def scan_intraday_stock(ticker):
     """Scans an individual stock for intraday volume and price breakouts."""
@@ -80,7 +73,6 @@ def scan_intraday_stock(ticker):
         prev_volume = df['Volume'].iloc[-2]
         curr_volume = df['Volume'].iloc[-1]
         
-        # Intraday breakout condition (e.g., volume spike with upward momentum)
         if curr_volume > (prev_volume * 2.5) and current_price > df['High'].iloc[-2]:
             return {
                 "ticker": ticker,
@@ -98,17 +90,14 @@ def scan_weekly_stock(ticker):
     """
     try:
         stock = yf.Ticker(ticker)
-        # Fetch daily or weekly historical data to evaluate structural closes
         df = stock.history(period="1y", interval="1d")
         if df.empty or len(df) < 100:
             return None
         
-        # Resample or extract weekly closing data
         weekly_df = df['Close'].resample('W').last().dropna()
         if len(weekly_df) < 12:
             return None
             
-        # Multi-month structural high (e.g., past 24 weeks high)
         weekly_high = weekly_df.iloc[-24:-1].max()
         
         # STRICT CLOSING PRICE CHECK: Using latest confirmed market close only
@@ -130,10 +119,10 @@ def main():
     stocks = get_nifty_750_pool()
     print(f"Loaded {len(stocks)} stocks into scanning pool.")
     
-    # Determine scan type based on time or execution argument
-    # (Weekly scan runs around 8:30 AM IST / Pre-market close evaluation)
-    current_hour = datetime.now().hour
-    is_weekly_schedule = (current_hour < 9) # Runs during early morning schedule
+    # Determine scan type based on time (GitHub Actions runs in UTC)
+    # 8:30 AM IST corresponds to 03:00 UTC
+    current_hour_utc = datetime.utcnow().hour
+    is_weekly_schedule = (current_hour_utc < 4) # Early morning pre-market execution
     
     matches = []
     
@@ -143,7 +132,7 @@ def main():
             results = executor.map(scan_weekly_stock, stocks)
             for r in results:
                 if r:
-                    matches.load if hasattr(matches, 'load') else matches.append(r) # standard append
+                    matches.append(r)
         
         if matches:
             msg = "🚀 *WEEKLY STRUCTURAL BASE BREAKOUTS (750 NSE)* 🚀\n\n"
