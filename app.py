@@ -3,7 +3,6 @@ import datetime
 from datetime import datetime, time, timedelta
 import os
 from bs4 import BeautifulSoup
-from google import genai
 import numpy as np
 import pandas as pd
 import requests
@@ -59,7 +58,7 @@ def is_market_closed():
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, **Weekly Income Strategies**, and **Google Gemini AI Live Chat Hub**."
+    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, and **Weekly Income Strategies**."
 )
 
 # --- GLOBAL SCAN CONTROLS ---
@@ -95,11 +94,10 @@ st.markdown("---")
 if "strategy_scans" not in st.session_state:
     st.session_state["strategy_scans"] = {}
 
-# --- CONSOLIDATED 4-TAB LAYOUT ---
-main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
+# --- CONSOLIDATED 3-TAB LAYOUT ---
+main_tab1, main_tab2, main_tab3 = st.tabs([
     "📈 Live Strategies Hub",
     "📊 Backtesters Hub",
-    "💬 Google Gemini Live Chat Hub",
     "📌 Terminal Info & Guide"
 ])
 
@@ -1403,60 +1401,12 @@ with main_tab2:
             st.info("Select a historical date and run the backtest to view weekly performance metrics.")
 
 
-# --- TAB 3: GOOGLE GEMINI LIVE CHAT HUB ---
+# --- TAB 3: TERMINAL INFO & GUIDE ---
 with main_tab3:
-    st.subheader("💬 Google Gemini Live Strategy & Market Chat Hub")
-    st.markdown("Ask any question regarding market trends, stock analysis, entry/exit triggers, or trading strategies. Answers are generated live directly from **Google Gemini**.")
-    
-    # Optional API key configuration in sidebar if environment variable is not pre-set
-    gemini_api_key = st.sidebar.text_input("Gemini API Key (Optional if set in environment)", type="password", key="gemini_key_input")
-    
-    if "chat_history" not in st.session_state:
-        st.session_state["chat_history"] = [
-            {"role": "assistant", "content": "Hello! I am your Google Gemini-powered trading and strategy assistant. How can I help you analyze the market or your setups today?"}
-        ]
-        
-    for msg in st.session_state["chat_history"]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            
-    user_query = st.chat_input("Ask Google Gemini any question about markets, stocks, or strategies...")
-    if user_query:
-        st.session_state["chat_history"].append({"role": "user", "content": user_query})
-        with st.chat_message("user"):
-            st.markdown(user_query)
-            
-        with st.spinner("Google Gemini is thinking..."):
-            try:
-                api_key_to_use = gemini_api_key if gemini_api_key else os.environ.get("GEMINI_API_KEY", "")
-                if not api_key_to_use and hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-                    api_key_to_use = st.secrets["GEMINI_API_KEY"]
-                
-                if api_key_to_use:
-                    client = genai.Client(api_key=api_key_to_use)
-                else:
-                    client = genai.Client()
-                
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=user_query,
-                )
-                bot_reply = response.text
-            except Exception as e:
-                bot_reply = f"Error generating response from Google Gemini: {e}. Please ensure your Gemini API key is configured in your environment variables or sidebar input."
-                
-        st.session_state["chat_history"].append({"role": "assistant", "content": bot_reply})
-        with st.chat_message("assistant"):
-            st.markdown(bot_reply)
-
-
-# --- TAB 4: TERMINAL INFO & GUIDE ---
-with main_tab4:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
     - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Chartlink & HTML pre-market) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing). Intraday scans automatically pre-qualify stocks meeting weekly/daily trend & pullback conditions.
     - **Tab 2 (Backtesters Hub):** Use the radio button to switch between the **Intraday Session Backtester** and the **Weekly / Swing Historical Backtester**.
-    - **Tab 3 (Google Gemini Live Chat Hub):** Direct, interactive AI chat assistant powered by Google Gemini for any trading or market queries.
     - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
     """)
 
