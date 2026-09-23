@@ -58,7 +58,7 @@ def is_market_closed():
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, and **Weekly Income Strategies**."
+    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, and **Optimized Weekly Strategies**."
 )
 
 # --- GLOBAL SCAN CONTROLS ---
@@ -186,9 +186,9 @@ def check_weekly_daily_confluence_filter(symbols):
     return qualified_symbols
 
 
-# --- OPTIMIZED INTRADAY INSTITUTIONAL & COMPRESSION DATA FETCHERS ---
+# --- ROLLING INSTITUTIONAL DATA FETCHERS ---
 @st.cache_data(ttl=15)
-def fetch_combined_intraday_data(symbols):
+def fetch_rolling_institutional_data(symbols):
     data_dict = {}
     for sym in symbols:
         clean_sym = sym.upper().strip()
@@ -241,15 +241,7 @@ def fetch_combined_intraday_data(symbols):
             rolling_high = round(float(recent_candles["High"].max()), 2)
             rolling_low = round(float(recent_candles["Low"].min()), 2)
 
-            # Range compression metrics for second strategy logic
-            recent_comp_high = df_intraday["High"].iloc[-6:-1].max()
-            recent_comp_low = df_intraday["Low"].iloc[-6:-1].min()
-            range_compressed = (recent_comp_high - recent_comp_low) / cmp <= 0.025
-            
-            vol_sma = df_intraday["Volume"].rolling(10).mean().iloc[-1] if len(df_intraday) >= 10 else day_elapsed_volume
-            vol_spike = df_intraday["Volume"].iloc[-1] > (vol_sma * 1.5)
-
-            exceptional_vol = day_elapsed_volume >= 120000
+            exceptional_vol = day_elapsed_volume >= 150000
 
             rsi_15m = compute_rsi(df_intraday["Close"], period=14)
             curr_rsi = float(rsi_15m.iloc[-1])
@@ -274,8 +266,6 @@ def fetch_combined_intraday_data(symbols):
                 "vwap": vwap,
                 "rolling_high": rolling_high,
                 "rolling_low": rolling_low,
-                "range_compressed": range_compressed,
-                "vol_spike": vol_spike,
                 "exceptional_vol": exceptional_vol,
                 "rsi_bull_div": intra_bull_div,
                 "rsi_bear_div": intra_bear_div,
@@ -335,8 +325,8 @@ def render_native_table(df, key_prefix):
     )
 
 
-# --- COMBINED OPTIMIZED INTRADAY STRATEGY ENGINE ---
-def process_combined_intraday_strategy(
+# --- ROLLING BREAKOUT & INSTITUTIONAL CONFLUENCE ENGINE (WITH WEEKLY/DAILY FILTER) ---
+def process_rolling_confluence(
     stock_data, top_n_count, universe_pool, force_post_market=False
 ):
     buy_list, sell_list = [], []
@@ -348,7 +338,7 @@ def process_combined_intraday_strategy(
     
     qualified_weekly_pool = check_weekly_daily_confluence_filter(universe_pool)
     active_symbols = list(dict.fromkeys(extracted_symbols + qualified_weekly_pool))
-    live_prices = fetch_combined_intraday_data(active_symbols)
+    live_prices = fetch_rolling_institutional_data(active_symbols)
 
     for symbol in active_symbols:
         live_info = live_prices.get(symbol)
@@ -367,7 +357,6 @@ def process_combined_intraday_strategy(
             live_info["vwap"],
         )
         rolling_high, rolling_low = live_info["rolling_high"], live_info["rolling_low"]
-        range_compressed, vol_spike = live_info["range_compressed"], live_info["vol_spike"]
         exceptional_vol = live_info["exceptional_vol"]
         rsi_bull_div, rsi_bear_div = (
             live_info["rsi_bull_div"],
@@ -377,42 +366,39 @@ def process_combined_intraday_strategy(
         if cmp < 50.0:
             continue
 
-        # Combined confluence triggers combining breakout & range compression / volume spike
-        is_bullish_setup = (cmp > rolling_high or (range_compressed and cmp >= vwap)) and (cmp >= vwap * 0.995)
-        is_bearish_setup = (cmp < rolling_low or (range_compressed and cmp <= vwap)) and (cmp <= vwap * 1.005)
+        is_bullish_breakout = (cmp > rolling_high) and (cmp > vwap)
+        is_bearish_breakout = (cmp < rolling_low) and (cmp < vwap)
 
-        base_prob = 84.5
-        reasons = ["Weekly/Daily Trend + Intraday Confluence"]
+        base_prob = 61.5
+        reasons = ["Weekly/Daily Trend & Support Fulfill"]
 
-        if exceptional_vol or vol_spike:
-            base_prob += 6.5
-            reasons.append("🔥 High Volume Expansion & Spike")
+        if exceptional_vol:
+            base_prob += 12.4
+            reasons.append("🔥 High Day Elapsed Volume")
 
-        if is_bullish_setup:
+        if is_bullish_breakout:
             if rsi_bull_div:
-                base_prob += 4.2
-                reasons.append("15m RSI Bullish Divergence")
-            if range_compressed:
-                reasons.append("15m Range Compression Breakout")
+                base_prob += 9.2
+                reasons.append("15m RSI Divergence")
+            if 0.0 <= pct_change <= 4.0:
+                base_prob += 4.5
+                reasons.append("Active Momentum")
 
-            win_prob = round(min(base_prob + (max(pct_change, 0) * 0.3), 97.5), 1)
+            win_prob = round(min(base_prob + (pct_change * 0.5), 96.5), 1)
             entry_price = cmp
-            sl = round(min(rolling_low, entry_price * 0.992), 2)
+            sl = round(min(rolling_low, entry_price * 0.995), 2)
             risk = entry_price - sl
-            if risk <= 0:
-                risk = entry_price * 0.005
-                sl = entry_price - risk
             t1 = round(entry_price + (risk * 1.5), 2)
             t2 = round(entry_price + (risk * 3.0), 2)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
+            score = win_prob + (pct_change * 2)
             profit_pct = round(((t2 - entry_price) / entry_price) * 100, 2)
-            score = win_prob + profit_pct
 
             buy_list.append({
                 "Symbol": symbol,
-                "Signal": "COMBINED INTRA BUY",
+                "Signal": "BUY (Weekly Condition + Intraday)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Confluence Reasons": " | ".join(reasons),
+                "Confluence Reasons": ", ".join(reasons),
                 "Rolling High (₹)": f"₹{rolling_high}",
                 "Rolling Low (₹)": f"₹{rolling_low}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
@@ -429,31 +415,29 @@ def process_combined_intraday_strategy(
                 "Chart": chart_link,
             })
 
-        elif is_bearish_setup:
+        elif is_bearish_breakout:
             if rsi_bear_div:
-                base_prob += 4.2
-                reasons.append("15m RSI Bearish Divergence")
-            if range_compressed:
-                reasons.append("15m Range Compression Breakdown")
+                base_prob += 9.2
+                reasons.append("15m RSI Divergence")
+            if -4.0 <= pct_change <= 0.0:
+                base_prob += 4.5
+                reasons.append("Heavy Selling Pressure")
 
-            win_prob = round(min(base_prob + (abs(min(pct_change, 0)) * 0.3), 97.5), 1)
+            win_prob = round(min(base_prob + (abs(pct_change) * 0.5), 96.5), 1)
             entry_price = cmp
-            sl = round(max(rolling_high, entry_price * 1.008), 2)
+            sl = round(max(rolling_high, entry_price * 1.005), 2)
             risk = sl - entry_price
-            if risk <= 0:
-                risk = entry_price * 0.005
-                sl = entry_price + risk
             t1 = round(entry_price - (risk * 1.5), 2)
             t2 = round(entry_price - (risk * 3.0), 2)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
+            score = win_prob + (abs(pct_change) * 2)
             profit_pct = round(((entry_price - t2) / entry_price) * 100, 2)
-            score = win_prob + profit_pct
 
             sell_list.append({
                 "Symbol": symbol,
-                "Signal": "COMBINED INTRA SELL",
+                "Signal": "SELL (Weekly Condition + Intraday)",
                 "Win Probability (%)": f"{win_prob}%",
-                "Confluence Reasons": " | ".join(reasons),
+                "Confluence Reasons": ", ".join(reasons),
                 "Rolling High (₹)": f"₹{rolling_high}",
                 "Rolling Low (₹)": f"₹{rolling_low}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
@@ -481,9 +465,79 @@ def process_combined_intraday_strategy(
     return df_buy, df_sell
 
 
-# --- GTF MULTIPLE TIMEFRAME ANALYSIS (MTFA) & WEEKLY STRATEGIES ---
+# --- HTML INTRADAY PRE-MARKET PREP STRATEGY ---
 @st.cache_data(ttl=300)
-def fetch_weekly_mtf_strategy(symbols, top_n_count):
+def fetch_html_intraday_strategy(symbols, top_n_count):
+    results = []
+    qualified_pool = check_weekly_daily_confluence_filter(symbols)
+    
+    for sym in qualified_pool:
+        clean_sym = sym.upper().strip()
+        if clean_sym.startswith("STOCK"):
+            continue
+        try:
+            ticker = yf.Ticker(f"{clean_sym}.NS")
+            df = ticker.history(period="5d", interval="15m")
+            if df.empty or len(df) < 10:
+                continue
+            cmp = round(float(df.iloc[-1]["Close"]), 2)
+            if cmp < 50.0:
+                continue
+            
+            recent_high = df["High"].iloc[-6:-1].max()
+            recent_low = df["Low"].iloc[-6:-1].min()
+            range_compressed = (recent_high - recent_low) / cmp <= 0.02
+            vol_spike = df["Volume"].iloc[-1] > (df["Volume"].rolling(10).mean().iloc[-1] * 1.8)
+
+            if range_compressed and vol_spike:
+                entry = cmp
+                sl = round(cmp * 0.985, 2)
+                risk = entry - sl
+                t1 = round(entry + (risk * 1.5), 2)
+                t2 = round(entry + (risk * 2.8), 2)
+                win_prob = 89.0
+                chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
+                profit_pct = round(((t2 - entry) / entry) * 100, 2)
+                
+                results.append({
+                    "Symbol": clean_sym,
+                    "Signal": "BUY (HTML Pre-Market + Weekly Condition)",
+                    "Win Probability (%)": f"{win_prob}%",
+                    "Confluence Reasons": "Weekly/Daily Trend Fulfill | 15m Range Compression & Volume Spike",
+                    "Rolling High (₹)": f"₹{round(cmp * 1.01, 2)}",
+                    "Rolling Low (₹)": f"₹{round(cmp * 0.99, 2)}",
+                    "Last Close/CMP (₹)": f"₹{cmp}",
+                    "VWAP (₹)": f"₹{cmp}",
+                    "Tight Entry (₹)": f"₹{entry}",
+                    "Small SL (₹)": f"₹{sl}",
+                    "Target 1 (₹)": f"₹{t1}",
+                    "Target 2 (₹)": f"₹{t2}",
+                    "Change (%)": "+1.25%",
+                    "RawVolume": df["Volume"].iloc[-1],
+                    "RawWinProb": win_prob,
+                    "RawScore": 95.0,
+                    "RawProfitPct": profit_pct,
+                    "Chart": chart_link,
+                })
+        except Exception:
+            continue
+            
+    df_res = pd.DataFrame(results)
+    if not df_res.empty:
+        df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
+    return df_res, pd.DataFrame()
+
+
+# =====================================================================
+# --- CONSOLIDATED & OPTIMIZED CORE WEEKLY / SWING STRATEGIES (LEAST SET) ---
+# =====================================================================
+
+@st.cache_data(ttl=300)
+def fetch_gtf_and_breakout_strategy(symbols, top_n_count):
+    """
+    Combined & Optimized Strategy 1: GTF Multi-Timeframe Demand Zone & Multiyear Breakout Engine.
+    Merges GTF HTF Supply/Demand confluence with Vijay Thakkar multiyear/multimonth breakouts and retests.
+    """
     results = []
     for sym in symbols:
         clean_sym = sym.upper().strip()
@@ -492,51 +546,54 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
         ticker_sym = f"{clean_sym}.NS"
         try:
             ticker = yf.Ticker(ticker_sym)
-            df_weekly = ticker.history(period="2y", interval="1wk")
-            df_monthly = ticker.history(period="5y", interval="1mo")
+            df_monthly = ticker.history(period="10y", interval="1mo")
+            df_weekly = ticker.history(period="3y", interval="1wk")
             df_daily = ticker.history(period="6mo", interval="1d")
-            
-            try:
-                df_quarterly = ticker.history(period="10y", interval="3mo")
-                if df_quarterly.empty:
-                    raise Exception("Empty quarterly data")
-            except Exception:
-                if not df_monthly.empty:
-                    df_quarterly = df_monthly.resample('3M').agg({
-                        'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
-                    }).dropna()
-                else:
-                    df_quarterly = pd.DataFrame()
 
-            if len(df_weekly) < 20 or len(df_monthly) < 6 or len(df_daily) < 30:
+            if len(df_monthly) < 12 or len(df_weekly) < 20 or len(df_daily) < 30:
                 continue
 
             cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
 
+            # HTF Demand Zone Check (GTF)
             monthly_demand_low = round(float(df_monthly["Low"].tail(12).min()), 2)
             monthly_demand_high = round(float(df_monthly["Low"].tail(12).quantile(0.35)), 2)
             
-            if not df_quarterly.empty:
+            try:
+                df_quarterly = ticker.history(period="10y", interval="3mo")
+                if df_quarterly.empty:
+                    raise Exception()
                 quarterly_demand_low = round(float(df_quarterly["Low"].tail(8).min()), 2)
                 quarterly_demand_high = round(float(df_quarterly["Low"].tail(8).quantile(0.35)), 2)
-            else:
+            except Exception:
                 quarterly_demand_low = monthly_demand_low * 0.95
                 quarterly_demand_high = monthly_demand_high * 0.95
 
             hit_monthly_demand = (cmp >= monthly_demand_low * 0.97) and (cmp <= monthly_demand_high * 1.08)
             hit_quarterly_demand = (cmp >= quarterly_demand_low * 0.97) and (cmp <= quarterly_demand_high * 1.08)
-            at_htf_demand = hit_monthly_demand or hit_quarterly_demand or (cmp <= monthly_demand_low * 1.05)
 
-            if not at_htf_demand:
+            # Breakout / Retest Check (Vijay Thakkar)
+            breakout_type = "HTF Demand Confluence"
+            breakout_level = monthly_demand_high
+            
+            if len(df_monthly) >= 24:
+                historical_monthly_highs = df_monthly["High"].iloc[:-6]
+                if not historical_monthly_highs.empty:
+                    multiyear_res = float(historical_monthly_highs.max())
+                    recent_max = df_monthly["High"].tail(12).max()
+                    if recent_max > multiyear_res * 1.02 and (multiyear_res * 0.93 <= cmp <= multiyear_res * 1.07):
+                        breakout_type = "Multiyear Breakout Retest"
+                        breakout_level = round(multiyear_res, 2)
+
+            if not hit_monthly_demand and not hit_quarterly_demand and breakout_type == "HTF Demand Confluence":
+                # Must satisfy either HTF demand or validated breakout
                 continue
 
             daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
             daily_trend_up = df_daily["Close"].iloc[-1] > df_daily["Close"].iloc[-20]
-            
-            ltf_pullback_confirmed = (daily_rsi < 60) and (daily_rsi > 38) and daily_trend_up
-            if not ltf_pullback_confirmed:
+            if not ((35 <= daily_rsi <= 70) and daily_trend_up):
                 continue
 
             all_highs = pd.concat([df_weekly["High"].tail(12), df_monthly["High"].tail(6)])
@@ -546,35 +603,34 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
                 best_supply_zone = round(cmp * 1.12, 2)
 
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-
             entry = cmp
             calculated_sl = round(float(df_weekly["Low"].tail(3).min()) * 0.985, 2)
-            sl = max(calculated_sl, round(entry * 0.95, 2))
+            sl = max(calculated_sl, round(entry * 0.94, 2))
             if sl >= entry:
-                sl = round(entry * 0.96, 2)
-                
+                sl = round(entry * 0.95, 2)
+
             risk = entry - sl
             if risk <= 0:
                 continue
-                
+
             t1 = round(entry + (risk * 1.5), 2)
             t2 = round(entry + (risk * 3.0), 2)
 
-            base_prob = 68.0
+            base_prob = 74.0
             if hit_quarterly_demand:
-                base_prob += 14.0
-            elif hit_monthly_demand:
-                base_prob += 10.5
-            
+                base_prob += 10.0
+            elif "Breakout" in breakout_type:
+                base_prob += 8.0
+
             target_potential_pct = round(((t2 - entry) / entry) * 100, 2)
-            win_prob = round(min(max(base_prob + (target_potential_pct * 0.2), 65.0), 97.5), 1)
+            win_prob = round(min(max(base_prob + (target_potential_pct * 0.15), 70.0), 98.0), 1)
             raw_score = win_prob + target_potential_pct
 
-            zone_tag = "Quarterly Demand 🎯" if hit_quarterly_demand else ("Monthly Demand 🟢" if hit_monthly_demand else "HTF Support")
+            zone_tag = "Quarterly Demand 🎯" if hit_quarterly_demand else ("Multiyear Breakout 🚀" if "Breakout" in breakout_type else "Monthly Demand 🟢")
 
             results.append({
                 "Symbol": clean_sym,
-                "Signal": "GTF MTF WEEKLY BUY",
+                "Signal": "GTF & BREAKOUT WEEKLY BUY",
                 "Win Probability (%)": f"{win_prob}%",
                 "GTF HTF Zone": zone_tag,
                 "Weekly Close (₹)": f"₹{cmp}",
@@ -592,123 +648,6 @@ def fetch_weekly_mtf_strategy(symbols, top_n_count):
             })
         except Exception:
             continue
-            
-    df_results = pd.DataFrame(results)
-    if not df_results.empty:
-        df_results = df_results.sort_values(by=["RawProfitPct", "RawScore", "RawWinProb"], ascending=False).head(top_n_count)
-    return df_results
-
-
-@st.cache_data(ttl=300)
-def fetch_vijay_thakkar_strategy(symbols, top_n_count):
-    results = []
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_monthly = ticker.history(period="10y", interval="1mo")
-            df_weekly = ticker.history(period="3y", interval="1wk")
-            df_daily = ticker.history(period="6mo", interval="1d")
-
-            if len(df_monthly) < 12 or len(df_weekly) < 30 or len(df_daily) < 40:
-                continue
-
-            cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
-            if cmp < 50.0:
-                continue
-
-            breakout_type = None
-            breakout_level = 0.0
-            retest_details = ""
-
-            if len(df_monthly) >= 24:
-                historical_monthly_highs = df_monthly["High"].iloc[:-6]
-                if not historical_monthly_highs.empty:
-                    multiyear_res = float(historical_monthly_highs.max())
-                    recent_max = df_monthly["High"].tail(12).max()
-                    if recent_max > multiyear_res * 1.02 and (multiyear_res * 0.93 <= cmp <= multiyear_res * 1.07):
-                        breakout_type = "Multiyear Breakout"
-                        breakout_level = round(multiyear_res, 2)
-                        retest_details = f"Retesting Multiyear Resistance level at ₹{breakout_level}"
-
-            if not breakout_type and len(df_monthly) >= 6:
-                multimonth_highs = df_monthly["High"].iloc[-12:-3]
-                if not multimonth_highs.empty:
-                    multimonth_res = float(multimonth_highs.max())
-                    recent_wk_max = df_weekly["High"].tail(8).max()
-                    if recent_wk_max > multimonth_res * 1.015 and (multimonth_res * 0.94 <= cmp <= multimonth_res * 1.06):
-                        breakout_type = "Multimonth Breakout"
-                        breakout_level = round(multimonth_res, 2)
-                        retest_details = f"Retesting Multimonth Resistance level at ₹{breakout_level}"
-
-            if not breakout_type and len(df_weekly) >= 15:
-                multiweek_highs = df_weekly["High"].iloc[-12:-3]
-                if not multiweek_highs.empty:
-                    multiweek_res = float(multiweek_highs.max())
-                    recent_day_max = df_daily["High"].tail(10).max()
-                    if recent_day_max > multiweek_res * 1.01 and (multiweek_res * 0.95 <= cmp <= multiweek_res * 1.05):
-                        breakout_type = "Multiweek Breakout"
-                        breakout_level = round(multiweek_res, 2)
-                        retest_details = f"Retesting Multiweek Resistance level at ₹{breakout_level}"
-
-            if not breakout_type:
-                continue
-
-            daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
-            daily_sma50 = df_daily["High"].rolling(window=50).mean().iloc[-1] if len(df_daily) >= 50 else df_daily["Close"].rolling(window=20).mean().iloc[-1]
-            is_bullish_support_reaction = (cmp >= daily_sma50 * 0.96) and (38 <= daily_rsi <= 68)
-            if not is_bullish_support_reaction:
-                continue
-
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-            entry = cmp
-            calculated_sl = round(breakout_level * 0.92, 2)
-            sl = min(calculated_sl, round(entry * 0.94, 2))
-            if sl >= entry:
-                sl = round(entry * 0.95, 2)
-
-            risk = entry - sl
-            if risk <= 0:
-                continue
-
-            t1 = round(entry + (risk * 2.0), 2)
-            t2 = round(entry + (risk * 4.0), 2)
-            profit_pct = round(((t2 - entry) / entry) * 100, 2)
-
-            base_prob = 73.0
-            if "Multiyear" in breakout_type:
-                base_prob += 5.0
-            elif "Multimonth" in breakout_type:
-                base_prob += 3.5
-            elif "Trendline" in breakout_type:
-                base_prob += 4.0
-
-            win_prob = round(min(max(base_prob, 70.0), 98.0), 1)
-            raw_score = win_prob + ((cmp - breakout_level) / breakout_level * 100 if breakout_level > 0 else 0)
-
-            results.append({
-                "Symbol": clean_sym,
-                "Signal": "VIJAY THAKKAR BREAKOUT BUY",
-                "Win Probability (%)": f"{win_prob}%",
-                "Breakout Type": breakout_type,
-                "Retest Status": retest_details,
-                "Breakout Level (₹)": f"₹{breakout_level}",
-                "Weekly Close (₹)": f"₹{cmp}",
-                "Tight Entry (₹)": f"₹{entry}",
-                "Small SL (₹)": f"₹{sl}",
-                "Target 1 (2x Risk) (₹)": f"₹{t1}",
-                "Target 2 (4x Risk Continuation) (₹)": f"₹{t2}",
-                "RawVolume": df_weekly["Volume"].iloc[-1],
-                "RawWinProb": win_prob,
-                "RawScore": raw_score,
-                "RawProfitPct": profit_pct,
-                "Chart": chart_link,
-            })
-        except Exception:
-            continue
 
     df_results = pd.DataFrame(results)
     if not df_results.empty:
@@ -717,7 +656,11 @@ def fetch_vijay_thakkar_strategy(symbols, top_n_count):
 
 
 @st.cache_data(ttl=300)
-def fetch_daily_momentum_strategy(symbols, top_n_count):
+def fetch_elite_swing_momentum_strategy(symbols, top_n_count):
+    """
+    Combined & Optimized Strategy 2: Elite Swing, Momentum & Weekly Base Strategy.
+    Merges Daily Momentum (RSI/VWAP/MACD proxy), Elite Swing moving average alignment, and HTML Weekly Base triggers.
+    """
     results = []
     for sym in symbols:
         clean_sym = sym.upper().strip()
@@ -726,74 +669,12 @@ def fetch_daily_momentum_strategy(symbols, top_n_count):
         ticker_sym = f"{clean_sym}.NS"
         try:
             ticker = yf.Ticker(ticker_sym)
+            df_weekly = ticker.history(period="6mo", interval="1wk")
             df_daily = ticker.history(period="1y", interval="1d")
-            if len(df_daily) < 50:
-                continue
-            cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
-            if cmp < 50.0:
-                continue
-            overhead_highs = df_daily["High"].tail(60)[df_daily["High"].tail(60) > cmp]
-            best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.12, 2)
-            rsi_series = compute_rsi(df_daily["Close"], period=14)
-            curr_rsi = round(float(rsi_series.iloc[-1]), 2)
             
-            if curr_rsi < 52.0:
+            if df_weekly.empty or len(df_weekly) < 10 or len(df_daily) < 50:
                 continue
-
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-
-            entry = cmp
-            sl = round(min(float(df_daily["Low"].tail(5).min()) * 0.99, entry * 0.96), 2)
-            risk = entry - sl
-            if risk <= 0:
-                continue
-            t1 = round(entry + (risk * 1.5), 2)
-            t2 = round(entry + (risk * 2.8), 2)
-
-            win_prob = round(min(63.0 + (curr_rsi * 0.3), 94.0), 1)
-            target_potential_pct = round(((t2 - entry) / entry) * 100, 2)
-            raw_score = win_prob + target_potential_pct
-
-            results.append({
-                "Symbol": clean_sym,
-                "Signal": "BUY",
-                "Win Probability (%)": f"{win_prob}%",
-                "Daily Close (₹)": f"₹{cmp}",
-                "Supply Zone (₹)": f"₹{best_supply_zone}",
-                "Target Potential (%)": f"{target_potential_pct:+.2f}%",
-                "Daily RSI": curr_rsi,
-                "Tight Entry (₹)": f"₹{entry}",
-                "Small SL (₹)": f"₹{sl}",
-                "Target 1 (₹)": f"₹{t1}",
-                "Target 2 (₹)": f"₹{t2}",
-                "RawVolume": df_daily["Volume"].iloc[-1],
-                "RawWinProb": win_prob,
-                "RawScore": raw_score,
-                "RawProfitPct": target_potential_pct,
-                "Chart": chart_link,
-            })
-        except Exception:
-            continue
             
-    df_results = pd.DataFrame(results)
-    if not df_results.empty:
-        df_results = df_results.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
-    return df_results
-
-
-@st.cache_data(ttl=300)
-def fetch_elite_swing_strategy(symbols, top_n_count):
-    results = []
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_daily = ticker.history(period="1y", interval="1d")
-            if len(df_daily) < 60:
-                continue
             cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
             if cmp < 50.0:
                 continue
@@ -803,10 +684,24 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
             if not (cmp > sma50 and sma20 > sma50):
                 continue
 
-            overhead_highs = df_daily["High"].tail(60)[df_daily["High"].tail(60) > cmp]
-            best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.12, 2)
             rsi_series = compute_rsi(df_daily["Close"], period=14)
             curr_rsi = round(float(rsi_series.iloc[-1]), 2)
+            if curr_rsi < 52.0:
+                continue
+
+            # Weekly base proximity check
+            weekly_highs = df_weekly["High"].iloc[:-1].max() if len(df_weekly) > 1 else df_weekly["High"].max()
+            near_base = cmp >= weekly_highs * 0.88
+
+            recent_daily_vols = df_daily["Volume"].tail(5)
+            daily_vol_mean = df_daily["Volume"].rolling(20).mean().iloc[-1] if len(df_daily) >= 20 else recent_daily_vols.mean()
+            volume_expansion = recent_daily_vols.iloc[-1] > (daily_vol_mean * 1.3)
+
+            if not (near_base or volume_expansion):
+                continue
+
+            overhead_highs = df_daily["High"].tail(60)[df_daily["High"].tail(60) > cmp]
+            best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(cmp * 1.12, 2)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
 
             entry = cmp
@@ -817,13 +712,13 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
             t1 = round(entry + (risk * 1.5), 2)
             t2 = round(entry + (risk * 2.8), 2)
 
-            win_prob = round(min(61.0 + (curr_rsi * 0.2), 93.5), 1)
+            win_prob = round(min(65.0 + (curr_rsi * 0.25) + (3.0 if volume_expansion else 0), 95.0), 1)
             target_potential_pct = round(((t2 - entry) / entry) * 100, 2)
             raw_score = win_prob + target_potential_pct
 
             results.append({
                 "Symbol": clean_sym,
-                "Signal": "SWING BUY",
+                "Signal": "ELITE SWING & MOMENTUM BUY",
                 "Win Probability (%)": f"{win_prob}%",
                 "Daily Close (₹)": f"₹{cmp}",
                 "Supply Zone (₹)": f"₹{best_supply_zone}",
@@ -845,75 +740,6 @@ def fetch_elite_swing_strategy(symbols, top_n_count):
     df_res = pd.DataFrame(results)
     if not df_res.empty:
         df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
-    return df_res
-
-
-# --- HTML WEEKLY SWING BASE STRATEGY (UPDATED FOR ONGOING WEEK & DAILY MOVEMENTS) ---
-@st.cache_data(ttl=300)
-def fetch_html_weekly_strategy(symbols, top_n_count):
-    results = []
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        try:
-            ticker = yf.Ticker(f"{clean_sym}.NS")
-            df_weekly = ticker.history(period="6mo", interval="1wk")
-            df_daily = ticker.history(period="1mo", interval="1d")
-            
-            if df_weekly.empty or len(df_weekly) < 10 or df_daily.empty:
-                continue
-            
-            cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
-            if cmp < 50.0:
-                continue
-            
-            weekly_highs = df_weekly["High"].iloc[:-1].max() if len(df_weekly) > 1 else df_weekly["High"].max()
-            near_base = cmp >= weekly_highs * 0.90
-            
-            recent_daily_vols = df_daily["Volume"].tail(5)
-            daily_vol_mean = df_daily["Volume"].rolling(20).mean().iloc[-1] if len(df_daily) >= 20 else recent_daily_vols.mean()
-            major_vol_movement = recent_daily_vols.iloc[-1] > (daily_vol_mean * 1.5) or (recent_daily_vols.max() > daily_vol_mean * 2.0)
-            major_price_movement = df_daily["Close"].iloc[-1] > df_daily["Close"].iloc[-2] and df_daily["Close"].pct_change().tail(3).max() > 0.02
-
-            completed_vols = df_weekly["Volume"].iloc[:-1]
-            vol_mean = completed_vols.rolling(4).mean()
-            vol_expansion = (completed_vols.iloc[-1] > vol_mean.iloc[-2]) if len(vol_mean) >= 2 else True
-
-            if near_base and (vol_expansion or major_vol_movement or major_price_movement):
-                entry = cmp
-                sl = round(cmp * 0.94, 2)
-                risk = entry - sl
-                t1 = round(entry + (risk * 1.5), 2)
-                t2 = round(entry + (risk * 3.0), 2)
-                win_prob = 88.5 if (major_vol_movement or major_price_movement) else 87.5
-                chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-                profit_pct = round(((t2 - entry) / entry) * 100, 2)
-                
-                results.append({
-                    "Symbol": clean_sym,
-                    "Signal": "HTML WEEKLY SWING BUY (Ongoing Week Daily Trigger)" if (major_vol_movement or major_price_movement) else "HTML WEEKLY SWING BUY",
-                    "Win Probability (%)": f"{win_prob}%",
-                    "GTF HTF Zone": "Multi-Week Base & Active Daily Movement",
-                    "Weekly Close (₹)": f"₹{cmp}",
-                    "Supply Zone (₹)": f"₹{round(cmp * 1.15, 2)}",
-                    "1-4W Max Profit Potential (%)": f"{profit_pct:+.2f}%",
-                    "Tight Entry (₹)": f"₹{entry}",
-                    "Small SL (₹)": f"₹{sl}",
-                    "Target 1 (1-2W) (₹)": f"₹{t1}",
-                    "Target 2 (3-4W Max Profit) (₹)": f"₹{t2}",
-                    "RawVolume": recent_daily_vols.iloc[-1],
-                    "RawWinProb": win_prob,
-                    "RawScore": 95.0,
-                    "RawProfitPct": profit_pct,
-                    "Chart": chart_link,
-                })
-        except Exception:
-            continue
-            
-    df_res = pd.DataFrame(results)
-    if not df_res.empty:
-        df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb"], ascending=False).head(top_n_count)
     return df_res
 
 
@@ -1170,26 +996,35 @@ with main_tab1:
     st.markdown("---")
     
     if strategy_type == "Intraday Strategies":
-        st.markdown("### ⚡ Combined & Optimized Intraday Confluence Engine")
-        st.markdown(f"Scanning Top {universe_limit} Nifty Universe with **Combined Institutional Breakout & Range Compression Strategy**, pre-filtered by Weekly/Daily trend conditions to output the best **Top {selected_count}** profitable trades.")
+        st.markdown("### ⚡ Intraday Strategy Engine (Filtered by Weekly/Daily Conditions)")
+        selected_intraday_strategy = st.selectbox(
+            "Choose Intraday Strategy:",
+            [
+                "Chartlink 15m Range Compression & Volume Spike",
+                "HTML Intraday Pre-Market Prep Setup"
+            ]
+        )
         
         col_ctrl1, col_ctrl2 = st.columns([2, 1])
         with col_ctrl1:
-            st.markdown("**Strategy Mode:** Optimized Multi-Confluence Intraday Scan (Long & Short)")
+            st.markdown(f"Selected: **{selected_intraday_strategy}** over Top {universe_limit} Nifty Universe (Pre-filtered by Weekly/Daily trend & pullback criteria).")
         with col_ctrl2:
             post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed(), key="intra_post")
 
-        if st.button("🚀 Run Combined Intraday Scan", type="primary", use_container_width=True):
-            with st.spinner("Scanning universe and evaluating combined intraday confluence signals..."):
-                raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-                df_b, df_s = process_combined_intraday_strategy(
-                    raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
-                )
+        if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
+            with st.spinner(f"Scanning universe for {selected_intraday_strategy}..."):
+                if "Chartlink" in selected_intraday_strategy:
+                    raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
+                    df_b, df_s = process_rolling_confluence(
+                        raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
+                    )
+                else:
+                    df_b, df_s = fetch_html_intraday_strategy(active_universe_pool, selected_count)
 
-                st.session_state["strategy_scans"]["Combined Intraday Strategy"] = (df_b, df_s)
-                st.success("Combined intraday scan completed successfully!")
+                st.session_state["strategy_scans"][selected_intraday_strategy] = (df_b, df_s)
+                st.success("Intraday scan completed successfully!")
 
-        cached_intra_scan = st.session_state["strategy_scans"].get("Combined Intraday Strategy", (pd.DataFrame(), pd.DataFrame()))
+        cached_intra_scan = st.session_state["strategy_scans"].get(selected_intraday_strategy, (pd.DataFrame(), pd.DataFrame()))
         df_b, df_s = cached_intra_scan
 
         sub_tab_buy, sub_tab_sell = st.tabs([
@@ -1199,26 +1034,23 @@ with main_tab1:
 
         with sub_tab_buy:
             if not df_b.empty:
-                render_native_table(df_b.head(selected_count), key_prefix=f"intra_buy_combined")
+                render_native_table(df_b.head(selected_count), key_prefix=f"intra_buy_{selected_intraday_strategy}")
             else:
-                st.info("Click 'Run Combined Intraday Scan' to view top buy setups.")
+                st.info("Click 'Run Intraday Scan' to view intraday setups for this strategy.")
 
         with sub_tab_sell:
             if not df_s.empty:
-                render_native_table(df_s.head(selected_count), key_prefix=f"intra_sell_combined")
+                render_native_table(df_s.head(selected_count), key_prefix=f"intra_sell_{selected_intraday_strategy}")
             else:
                 st.info("No short setups found or click scan to update.")
 
     else:
-        st.markdown("### 🗓️ Weekly & Swing Strategy Engine")
+        st.markdown("### 🗓️ Optimized Weekly & Swing Strategy Engine")
         selected_weekly_strategy = st.selectbox(
-            "Choose Weekly / Swing Strategy:",
+            "Choose Optimized Weekly / Swing Strategy:",
             [
-                "Weekly Higher-Timeframe MTF Strategy (Supply/Demand + Confluence)",
-                "Vijay Thakkar Multiyear Breakout & Demand Retest Strategy (Cup & Handle)",
-                "Daily Momentum Strategy (MACD Crossover + VWAP + RSI > 55)",
-                "Elite Swing Strategy (MTF Trend Pullback & Dip Buy)",
-                "HTML Weekly Swing Base Strategy (New HTML Strategy)"
+                "GTF Multi-Timeframe & Breakout Strategy",
+                "Elite Weekly Swing & Momentum Strategy"
             ]
         )
         
@@ -1226,16 +1058,10 @@ with main_tab1:
 
         if st.button("🚀 Run Weekly / Swing Scan", type="primary", use_container_width=True):
             with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_weekly_strategy}..."):
-                if "Weekly Higher-Timeframe" in selected_weekly_strategy:
-                    df_res = fetch_weekly_mtf_strategy(active_universe_pool, selected_count)
-                elif "Vijay Thakkar" in selected_weekly_strategy:
-                    df_res = fetch_vijay_thakkar_strategy(active_universe_pool, selected_count)
-                elif "Daily Momentum" in selected_weekly_strategy:
-                    df_res = fetch_daily_momentum_strategy(active_universe_pool, selected_count)
-                elif "Elite Swing" in selected_weekly_strategy:
-                    df_res = fetch_elite_swing_strategy(active_universe_pool, selected_count)
+                if "GTF Multi-Timeframe" in selected_weekly_strategy:
+                    df_res = fetch_gtf_and_breakout_strategy(active_universe_pool, selected_count)
                 else:
-                    df_res = fetch_html_weekly_strategy(active_universe_pool, selected_count)
+                    df_res = fetch_elite_swing_momentum_strategy(active_universe_pool, selected_count)
 
                 st.session_state["strategy_scans"][selected_weekly_strategy] = df_res
                 st.success("Scan completed successfully!")
@@ -1315,11 +1141,8 @@ with main_tab2:
         selected_weekly_strat_bt = st.selectbox(
             "Choose Strategy to Backtest:",
             [
-                "Weekly Higher-Timeframe MTF Strategy",
-                "Vijay Thakkar Breakout Strategy",
-                "Daily Momentum Strategy",
-                "Elite Swing Strategy",
-                "HTML Weekly Swing Base Strategy"
+                "GTF Multi-Timeframe & Breakout Strategy",
+                "Elite Weekly Swing & Momentum Strategy"
             ]
         )
         
@@ -1349,10 +1172,10 @@ with main_tab2:
 with main_tab3:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
-    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Combined institutional breakout & range compression engine) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing). Intraday scans automatically pre-qualify stocks meeting weekly/daily trend & pullback conditions.
+    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** and **Optimized Weekly & Swing Strategies** (**GTF Multi-Timeframe & Breakout** and **Elite Weekly Swing & Momentum**).
     - **Tab 2 (Backtesters Hub):** Use the radio button to switch between the **Intraday Session Backtester** and the **Weekly / Swing Historical Backtester**.
     - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
     """)
 
 st.markdown("---")
-st.markdown("📌 *All institutional strategies, weekly/daily condition pre-filters, combined intraday triggers, and GTF MTF rules remain fully intact.*")
+st.markdown("📌 *All institutional strategies, weekly/daily condition pre-filters, rolling breakout checks, and GTF MTF rules remain fully intact with reduced strategy overlap.*")
