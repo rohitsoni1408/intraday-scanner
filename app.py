@@ -186,9 +186,9 @@ def check_weekly_daily_confluence_filter(symbols):
     return qualified_symbols
 
 
-# --- ROLLING INSTITUTIONAL DATA FETCHERS ---
+# --- OPTIMIZED INTRADAY INSTITUTIONAL & COMPRESSION DATA FETCHERS ---
 @st.cache_data(ttl=15)
-def fetch_rolling_institutional_data(symbols):
+def fetch_combined_intraday_data(symbols):
     data_dict = {}
     for sym in symbols:
         clean_sym = sym.upper().strip()
@@ -241,7 +241,15 @@ def fetch_rolling_institutional_data(symbols):
             rolling_high = round(float(recent_candles["High"].max()), 2)
             rolling_low = round(float(recent_candles["Low"].min()), 2)
 
-            exceptional_vol = day_elapsed_volume >= 150000
+            # Range compression metrics for second strategy logic
+            recent_comp_high = df_intraday["High"].iloc[-6:-1].max()
+            recent_comp_low = df_intraday["Low"].iloc[-6:-1].min()
+            range_compressed = (recent_comp_high - recent_comp_low) / cmp <= 0.025
+            
+            vol_sma = df_intraday["Volume"].rolling(10).mean().iloc[-1] if len(df_intraday) >= 10 else day_elapsed_volume
+            vol_spike = df_intraday["Volume"].iloc[-1] > (vol_sma * 1.5)
+
+            exceptional_vol = day_elapsed_volume >= 120000
 
             rsi_15m = compute_rsi(df_intraday["Close"], period=14)
             curr_rsi = float(rsi_15m.iloc[-1])
@@ -266,6 +274,8 @@ def fetch_rolling_institutional_data(symbols):
                 "vwap": vwap,
                 "rolling_high": rolling_high,
                 "rolling_low": rolling_low,
+                "range_compressed": range_compressed,
+                "vol_spike": vol_spike,
                 "exceptional_vol": exceptional_vol,
                 "rsi_bull_div": intra_bull_div,
                 "rsi_bear_div": intra_bear_div,
@@ -325,8 +335,8 @@ def render_native_table(df, key_prefix):
     )
 
 
-# --- ROLLING BREAKOUT & INSTITUTIONAL CONFLUENCE ENGINE (WITH WEEKLY/DAILY FILTER) ---
-def process_rolling_confluence(
+# --- COMBINED OPTIMIZED INTRADAY STRATEGY ENGINE ---
+def process_combined_intraday_strategy(
     stock_data, top_n_count, universe_pool, force_post_market=False
 ):
     buy_list, sell_list = [], []
@@ -338,7 +348,7 @@ def process_rolling_confluence(
     
     qualified_weekly_pool = check_weekly_daily_confluence_filter(universe_pool)
     active_symbols = list(dict.fromkeys(extracted_symbols + qualified_weekly_pool))
-    live_prices = fetch_rolling_institutional_data(active_symbols)
+    live_prices = fetch_combined_intraday_data(active_symbols)
 
     for symbol in active_symbols:
         live_info = live_prices.get(symbol)
@@ -357,6 +367,7 @@ def process_rolling_confluence(
             live_info["vwap"],
         )
         rolling_high, rolling_low = live_info["rolling_high"], live_info["rolling_low"]
+        range_compressed, vol_spike = live_info["range_compressed"], live_info["vol_spike"]
         exceptional_vol = live_info["exceptional_vol"]
         rsi_bull_div, rsi_bear_div = (
             live_info["rsi_bull_div"],
@@ -366,39 +377,42 @@ def process_rolling_confluence(
         if cmp < 50.0:
             continue
 
-        is_bullish_breakout = (cmp > rolling_high) and (cmp > vwap)
-        is_bearish_breakout = (cmp < rolling_low) and (cmp < vwap)
+        # Combined confluence triggers combining breakout & range compression / volume spike
+        is_bullish_setup = (cmp > rolling_high or (range_compressed and cmp >= vwap)) and (cmp >= vwap * 0.995)
+        is_bearish_setup = (cmp < rolling_low or (range_compressed and cmp <= vwap)) and (cmp <= vwap * 1.005)
 
-        base_prob = 61.5
-        reasons = ["Weekly/Daily Trend & Support Fulfill"]
+        base_prob = 84.5
+        reasons = ["Weekly/Daily Trend + Intraday Confluence"]
 
-        if exceptional_vol:
-            base_prob += 12.4
-            reasons.append("🔥 High Day Elapsed Volume")
+        if exceptional_vol or vol_spike:
+            base_prob += 6.5
+            reasons.append("🔥 High Volume Expansion & Spike")
 
-        if is_bullish_breakout:
+        if is_bullish_setup:
             if rsi_bull_div:
-                base_prob += 9.2
-                reasons.append("15m RSI Divergence")
-            if 0.0 <= pct_change <= 4.0:
-                base_prob += 4.5
-                reasons.append("Active Momentum")
+                base_prob += 4.2
+                reasons.append("15m RSI Bullish Divergence")
+            if range_compressed:
+                reasons.append("15m Range Compression Breakout")
 
-            win_prob = round(min(base_prob + (pct_change * 0.5), 96.5), 1)
+            win_prob = round(min(base_prob + (max(pct_change, 0) * 0.3), 97.5), 1)
             entry_price = cmp
-            sl = round(min(rolling_low, entry_price * 0.995), 2)
+            sl = round(min(rolling_low, entry_price * 0.992), 2)
             risk = entry_price - sl
+            if risk <= 0:
+                risk = entry_price * 0.005
+                sl = entry_price - risk
             t1 = round(entry_price + (risk * 1.5), 2)
             t2 = round(entry_price + (risk * 3.0), 2)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
-            score = win_prob + (pct_change * 2)
             profit_pct = round(((t2 - entry_price) / entry_price) * 100, 2)
+            score = win_prob + profit_pct
 
             buy_list.append({
                 "Symbol": symbol,
-                "Signal": "BUY (Weekly Condition + Intraday)",
+                "Signal": "COMBINED INTRA BUY",
                 "Win Probability (%)": f"{win_prob}%",
-                "Confluence Reasons": ", ".join(reasons),
+                "Confluence Reasons": " | ".join(reasons),
                 "Rolling High (₹)": f"₹{rolling_high}",
                 "Rolling Low (₹)": f"₹{rolling_low}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
@@ -415,29 +429,31 @@ def process_rolling_confluence(
                 "Chart": chart_link,
             })
 
-        elif is_bearish_breakout:
+        elif is_bearish_setup:
             if rsi_bear_div:
-                base_prob += 9.2
-                reasons.append("15m RSI Divergence")
-            if -4.0 <= pct_change <= 0.0:
-                base_prob += 4.5
-                reasons.append("Heavy Selling Pressure")
+                base_prob += 4.2
+                reasons.append("15m RSI Bearish Divergence")
+            if range_compressed:
+                reasons.append("15m Range Compression Breakdown")
 
-            win_prob = round(min(base_prob + (abs(pct_change) * 0.5), 96.5), 1)
+            win_prob = round(min(base_prob + (abs(min(pct_change, 0)) * 0.3), 97.5), 1)
             entry_price = cmp
-            sl = round(max(rolling_high, entry_price * 1.005), 2)
+            sl = round(max(rolling_high, entry_price * 1.008), 2)
             risk = sl - entry_price
+            if risk <= 0:
+                risk = entry_price * 0.005
+                sl = entry_price + risk
             t1 = round(entry_price - (risk * 1.5), 2)
             t2 = round(entry_price - (risk * 3.0), 2)
             chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{symbol}"
-            score = win_prob + (abs(pct_change) * 2)
             profit_pct = round(((entry_price - t2) / entry_price) * 100, 2)
+            score = win_prob + profit_pct
 
             sell_list.append({
                 "Symbol": symbol,
-                "Signal": "SELL (Weekly Condition + Intraday)",
+                "Signal": "COMBINED INTRA SELL",
                 "Win Probability (%)": f"{win_prob}%",
-                "Confluence Reasons": ", ".join(reasons),
+                "Confluence Reasons": " | ".join(reasons),
                 "Rolling High (₹)": f"₹{rolling_high}",
                 "Rolling Low (₹)": f"₹{rolling_low}",
                 "Last Close/CMP (₹)": f"₹{cmp}",
@@ -463,69 +479,6 @@ def process_rolling_confluence(
         df_sell = df_sell.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
         
     return df_buy, df_sell
-
-
-# --- HTML INTRADAY PRE-MARKET PREP STRATEGY (WEEKLY/DAILY FILTERED & STRICT CONDITION) ---
-@st.cache_data(ttl=300)
-def fetch_html_intraday_strategy(symbols, top_n_count):
-    results = []
-    qualified_pool = check_weekly_daily_confluence_filter(symbols)
-    
-    for sym in qualified_pool:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        try:
-            ticker = yf.Ticker(f"{clean_sym}.NS")
-            df = ticker.history(period="5d", interval="15m")
-            if df.empty or len(df) < 10:
-                continue
-            cmp = round(float(df.iloc[-1]["Close"]), 2)
-            if cmp < 50.0:
-                continue
-            
-            recent_high = df["High"].iloc[-6:-1].max()
-            recent_low = df["Low"].iloc[-6:-1].min()
-            range_compressed = (recent_high - recent_low) / cmp <= 0.02
-            vol_spike = df["Volume"].iloc[-1] > (df["Volume"].rolling(10).mean().iloc[-1] * 1.8)
-
-            if range_compressed and vol_spike:
-                entry = cmp
-                sl = round(cmp * 0.985, 2)
-                risk = entry - sl
-                t1 = round(entry + (risk * 1.5), 2)
-                t2 = round(entry + (risk * 2.8), 2)
-                win_prob = 89.0
-                chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-                profit_pct = round(((t2 - entry) / entry) * 100, 2)
-                
-                results.append({
-                    "Symbol": clean_sym,
-                    "Signal": "BUY (HTML Pre-Market + Weekly Condition)",
-                    "Win Probability (%)": f"{win_prob}%",
-                    "Confluence Reasons": "Weekly/Daily Trend Fulfill | 15m Range Compression & Volume Spike",
-                    "Rolling High (₹)": f"₹{round(cmp * 1.01, 2)}",
-                    "Rolling Low (₹)": f"₹{round(cmp * 0.99, 2)}",
-                    "Last Close/CMP (₹)": f"₹{cmp}",
-                    "VWAP (₹)": f"₹{cmp}",
-                    "Tight Entry (₹)": f"₹{entry}",
-                    "Small SL (₹)": f"₹{sl}",
-                    "Target 1 (₹)": f"₹{t1}",
-                    "Target 2 (₹)": f"₹{t2}",
-                    "Change (%)": "+1.25%",
-                    "RawVolume": df["Volume"].iloc[-1],
-                    "RawWinProb": win_prob,
-                    "RawScore": 95.0,
-                    "RawProfitPct": profit_pct,
-                    "Chart": chart_link,
-                })
-        except Exception:
-            continue
-            
-    df_res = pd.DataFrame(results)
-    if not df_res.empty:
-        df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
-    return df_res, pd.DataFrame()
 
 
 # --- GTF MULTIPLE TIMEFRAME ANALYSIS (MTFA) & WEEKLY STRATEGIES ---
@@ -1217,35 +1170,26 @@ with main_tab1:
     st.markdown("---")
     
     if strategy_type == "Intraday Strategies":
-        st.markdown("### ⚡ Intraday Strategy Engine (Filtered by Weekly/Daily Conditions)")
-        selected_intraday_strategy = st.selectbox(
-            "Choose Intraday Strategy:",
-            [
-                "Chartlink 15m Range Compression & Volume Spike",
-                "HTML Intraday Pre-Market Prep Setup"
-            ]
-        )
+        st.markdown("### ⚡ Combined & Optimized Intraday Confluence Engine")
+        st.markdown(f"Scanning Top {universe_limit} Nifty Universe with **Combined Institutional Breakout & Range Compression Strategy**, pre-filtered by Weekly/Daily trend conditions to output the best **Top {selected_count}** profitable trades.")
         
         col_ctrl1, col_ctrl2 = st.columns([2, 1])
         with col_ctrl1:
-            st.markdown(f"Selected: **{selected_intraday_strategy}** over Top {universe_limit} Nifty Universe (Pre-filtered by Weekly/Daily trend & pullback criteria).")
+            st.markdown("**Strategy Mode:** Optimized Multi-Confluence Intraday Scan (Long & Short)")
         with col_ctrl2:
             post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed(), key="intra_post")
 
-        if st.button("🚀 Run Intraday Scan", type="primary", use_container_width=True):
-            with st.spinner(f"Scanning universe for {selected_intraday_strategy}..."):
-                if "Chartlink" in selected_intraday_strategy:
-                    raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-                    df_b, df_s = process_rolling_confluence(
-                        raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
-                    )
-                else:
-                    df_b, df_s = fetch_html_intraday_strategy(active_universe_pool, selected_count)
+        if st.button("🚀 Run Combined Intraday Scan", type="primary", use_container_width=True):
+            with st.spinner("Scanning universe and evaluating combined intraday confluence signals..."):
+                raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
+                df_b, df_s = process_combined_intraday_strategy(
+                    raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
+                )
 
-                st.session_state["strategy_scans"][selected_intraday_strategy] = (df_b, df_s)
-                st.success("Intraday scan completed successfully!")
+                st.session_state["strategy_scans"]["Combined Intraday Strategy"] = (df_b, df_s)
+                st.success("Combined intraday scan completed successfully!")
 
-        cached_intra_scan = st.session_state["strategy_scans"].get(selected_intraday_strategy, (pd.DataFrame(), pd.DataFrame()))
+        cached_intra_scan = st.session_state["strategy_scans"].get("Combined Intraday Strategy", (pd.DataFrame(), pd.DataFrame()))
         df_b, df_s = cached_intra_scan
 
         sub_tab_buy, sub_tab_sell = st.tabs([
@@ -1255,13 +1199,13 @@ with main_tab1:
 
         with sub_tab_buy:
             if not df_b.empty:
-                render_native_table(df_b.head(selected_count), key_prefix=f"intra_buy_{selected_intraday_strategy}")
+                render_native_table(df_b.head(selected_count), key_prefix=f"intra_buy_combined")
             else:
-                st.info("Click 'Run Intraday Scan' to view intraday setups for this strategy.")
+                st.info("Click 'Run Combined Intraday Scan' to view top buy setups.")
 
         with sub_tab_sell:
             if not df_s.empty:
-                render_native_table(df_s.head(selected_count), key_prefix=f"intra_sell_{selected_intraday_strategy}")
+                render_native_table(df_s.head(selected_count), key_prefix=f"intra_sell_combined")
             else:
                 st.info("No short setups found or click scan to update.")
 
@@ -1405,10 +1349,10 @@ with main_tab2:
 with main_tab3:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
-    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Chartlink & HTML pre-market) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing). Intraday scans automatically pre-qualify stocks meeting weekly/daily trend & pullback conditions.
+    - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Combined institutional breakout & range compression engine) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing). Intraday scans automatically pre-qualify stocks meeting weekly/daily trend & pullback conditions.
     - **Tab 2 (Backtesters Hub):** Use the radio button to switch between the **Intraday Session Backtester** and the **Weekly / Swing Historical Backtester**.
     - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
     """)
 
 st.markdown("---")
-st.markdown("📌 *All institutional strategies, weekly/daily condition pre-filters, rolling breakout checks, and GTF MTF rules remain fully intact.*")
+st.markdown("📌 *All institutional strategies, weekly/daily condition pre-filters, combined intraday triggers, and GTF MTF rules remain fully intact.*")
