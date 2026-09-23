@@ -23,7 +23,8 @@ def send_telegram_message(message):
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
-        "parse_mode": "Markdown"
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
     }
     try:
         response = requests.post(url, json=payload, timeout=10)
@@ -130,7 +131,7 @@ def scan_intraday_stock(ticker):
             reasons = ["Weekly/Daily Trend + Intraday Confluence"]
             if exceptional_vol or vol_spike:
                 base_prob += 6.5
-                reasons.append("High Volume Expansion")
+                reasons.append("High Volume Expansion & Spike")
             if rsi_bull_div:
                 base_prob += 4.2
                 reasons.append("15m RSI Bullish Divergence")
@@ -139,18 +140,29 @@ def scan_intraday_stock(ticker):
 
             win_prob = round(min(base_prob, 97.5), 1)
             sl = round(min(rolling_low, cmp * 0.992), 2)
-            t2 = round(cmp + ((cmp - sl) * 3.0), 2)
-            score = win_prob + ((t2 - cmp) / cmp * 100)
+            risk = cmp - sl
+            if risk <= 0:
+                risk = cmp * 0.005
+                sl = cmp - risk
+            t1 = round(cmp + (risk * 1.5), 2)
+            t2 = round(cmp + (risk * 3.0), 2)
+            profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+            score = win_prob + profit_pct
+            clean_sym_name = ticker.replace(".NS", "")
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
 
             return {
-                "ticker": ticker,
+                "ticker": clean_sym_name,
                 "signal": "INTRADAY BUY",
                 "price": cmp,
                 "win_prob": win_prob,
                 "reasons": " | ".join(reasons),
                 "sl": sl,
-                "target": t2,
-                "score": score
+                "target_1": t1,
+                "target_2": t2,
+                "profit_pct": profit_pct,
+                "score": score,
+                "chart": chart_link
             }
     except Exception:
         pass
@@ -192,22 +204,27 @@ def scan_weekly_stock(ticker):
         risk = cmp - sl
         if risk <= 0:
             return None
+        t1 = round(cmp + (risk * 1.5), 2)
         t2 = round(cmp + (risk * 3.0), 2)
         target_pct = round(((t2 - cmp) / cmp) * 100, 2)
 
         win_prob = 86.5 if hit_monthly_demand else 84.0
         score = win_prob + target_pct
+        clean_sym_name = ticker.replace(".NS", "")
+        chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
 
         return {
-            "ticker": ticker,
+            "ticker": clean_sym_name,
             "signal": "WEEKLY / SWING BUY",
             "close_price": cmp,
             "setup_type": breakout_type,
             "win_prob": win_prob,
             "target_pct": target_pct,
             "sl": sl,
-            "target": t2,
-            "score": score
+            "target_1": t1,
+            "target_2": t2,
+            "score": score,
+            "chart": chart_link
         }
     except Exception:
         pass
@@ -233,17 +250,20 @@ def main():
                 if r:
                     matches.append(r)
         
-        # Sort by best score/profit potential and keep top 3
-        matches = sorted(matches, key=lambda x: x['score'], reverse=True)[:3]
+        # Sort by best score/profit potential and keep top 5
+        matches = sorted(matches, key=lambda x: x['score'], reverse=True)[:5]
 
         if matches:
-            msg = "🚀 *GTF WEEKLY & SWING CONFLUENCE (TOP 3)* 🚀\n\n"
+            msg = "🚀 *GTF WEEKLY & SWING CONFLUENCE (TOP 5)* 🚀\n\n"
             for m in matches:
                 msg += (
-                    f"• *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"  Setup: {m['setup_type']}\n"
-                    f"  Entry / CMP: ₹{m['close_price']:.2f}\n"
-                    f"  Stop Loss: ₹{m['sl']:.2f} | Target: ₹{m['target']:.2f} ({m['target_pct']:+.2f}%)\n\n"
+                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+                    f"• *Reason for Buy:* {m['setup_type']}\n"
+                    f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
+                    f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
+                    f"• *Target 1 (1-2W):* ₹{m['target_1']:.2f}\n"
+                    f"• *Target 2 (3-4W):* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
+                    f"• [Open TradingView Chart]({m['chart']})\n\n"
                 )
             send_telegram_message(msg)
         else:
@@ -258,21 +278,22 @@ def main():
             results = executor.map(scan_intraday_stock, stocks)
             for r in results:
                 if r:
-                    t = r['ticker']
-                    # Allow refresh every session or cycle if needed
                     matches.append(r)
 
-        # Sort by highest score/probability and pick top 3
-        matches = sorted(matches, key=lambda x: x['score'], reverse=True)[:3]
+        # Sort by highest score/probability and pick top 5
+        matches = sorted(matches, key=lambda x: x['score'], reverse=True)[:5]
 
         if matches:
-            msg = "⚡ *TOP 3 INTRADAY CONFLUENCE ALERTS* ⚡\n\n"
+            msg = "⚡ *TOP 5 INTRADAY CONFLUENCE ALERTS* ⚡\n\n"
             for m in matches:
                 msg += (
-                    f"• *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"  CMP: ₹{m['price']:.2f}\n"
-                    f"  🔍 *Reason for Entry:* {m['reasons']}\n"
-                    f"  Stop Loss: ₹{m['sl']:.2f} | Target: ₹{m['target']:.2f}\n\n"
+                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+                    f"• *Reason for Buy:* {m['reasons']}\n"
+                    f"• *Tight Entry:* ₹{m['price']:.2f}\n"
+                    f"• *Small SL:* ₹{m['sl']:.2f}\n"
+                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
+                    f"• [Open TradingView Chart]({m['chart']})\n\n"
                 )
             send_telegram_message(msg)
             
