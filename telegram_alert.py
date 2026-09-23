@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import concurrent.futures
 import requests
 import pandas as pd
@@ -51,30 +51,60 @@ def save_sent_state(state):
     except Exception as e:
         print(f"Failed to save state: {e}")
 
-def get_nifty_750_pool():
-    """Returns the comprehensive pool of NSE stocks (Top 750 market-cap universe)."""
-    market_cap_tier_1 = [
+def get_comprehensive_stock_pool():
+    """
+    Dynamically fetches the Nifty 500 universe from NSE archives 
+    and combines it with a robust liquid stock pool.
+    """
+    stocks = set()
+    
+    # 1. Try fetching official Nifty 500 list from NSE archives
+    try:
+        url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            from io import StringIO
+            df_nifty = pd.read_csv(StringIO(response.text))
+            if "Symbol" in df_nifty.columns:
+                for sym in df_nifty["Symbol"].dropna():
+                    clean_sym = str(sym).strip().upper()
+                    if clean_sym:
+                        stocks.add(f"{clean_sym}.NS")
+                print(f"Successfully loaded {len(stocks)} symbols from official Nifty 500 index.")
+    except Exception as e:
+        print(f"Could not fetch live Nifty 500 list: {e}. Using fallback pool.")
+
+    # 2. Comprehensive High-Liquidity Fallback Pool (F&O + Nifty 100/200/500/Midcap)
+    fallback_pool = [
         "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", "SBIN", "LTIM", "ITC", "HINDUNILVR",
         "LT", "BAJFINANCE", "AXISBANK", "KOTAKBANK", "MARUTI", "SUNPHARMA", "TITAN", "ULTRACEMCO", "NTPC", "ONGC",
         "POWERGRID", "ASIANPAINT", "ADANIENT", "ADANIPORTS", "COALINDIA", "TATASTEEL", "HINDALCO", "GRASIM", "TECHM", "WIPRO",
-        "BAJAJFINSV", "SBILIFE", "HDFCLIFE", "DIVISLAB", "CIPLA", "EICHERMOT", "BPCL", "TATAMOTORS", "HEROMOTOCO", "BRITANNIA"
-    ]
-    market_cap_tier_2 = [
+        "BAJAJFINSV", "SBILIFE", "HDFCLIFE", "DIVISLAB", "CIPLA", "EICHERMOT", "BPCL", "TATAMOTORS", "HEROMOTOCO", "BRITANNIA",
         "INDUSINDBK", "JSWSTEEL", "APOLLOHOSP", "DRREDDY", "SHRIRAMFIN", "M&M", "NESTLEIND", "TATACONSUM", "BAJAJ-AUTO", "HCLTECH",
         "SBICARD", "PIDILITIND", "SRF", "ATGL", "ADANIGREEN", "ADANIPOWER", "HAL", "BEL", "IOC", "GAIL",
         "ZOMATO", "PAYTM", "NYKAA", "POLICYBZR", "DELHIVERY", "DMART", "LUPIN", "TORNTPHARM", "CANBK", "PNB",
-        "BANKBARODA", "CHOLAFIN", "MUTHOOTFIN", "RECLTD", "PFC", "NHPC", "SJVN", "IRFC", "RVNL", "CONCOR"
-    ]
-    market_cap_tier_3 = [
+        "BANKBARODA", "CHOLAFIN", "MUTHOOTFIN", "RECLTD", "PFC", "NHPC", "SJVN", "IRFC", "RVNL", "CONCOR",
         "TRENT", "ASHOKLEY", "BOSCHLTD", "INDIGO", "NAUKRI", "MCDOWELL-N", "UPL", "AMBUJACEM", "ACC", "PAGEIND",
         "PERSISTENT", "COFORGE", "MPHASIS", "LTTS", "OFSS", "POLYCAB", "DIXON", "ASTRAL", "SUPREMEIND", "BHARATFORG",
         "ABFRL", "JUBLFOOD", "DEVYANI", "BEML", "CUMMINSIND", "SIEMENS", "ABB", "SCHAEFFLER", "THERMAX", "VOLTAS",
-        "HAVELLS", "WHIRLPOOL", "CROMPTON", "MANYAVAR", "METROPOLIS", "LALPATHLAB", "SYNGENE", "IPCALAB", "GLENMARK", "AIAENG"
+        "HAVELLS", "WHIRLPOOL", "CROMPTON", "MANYAVAR", "METROPOLIS", "LALPATHLAB", "SYNGENE", "IPCALAB", "GLENMARK", "AIAENG",
+        "POLYCAB", "KPITTECH", "PERSISTENT", "COFORGE", "MUTHOOTFIN", "MANAPPURAM", "IBULHSGFIN", "AARTIIND", "ALKEM", "APOLLOTYRE",
+        "BALKRISIND", "BATAINDIA", "BHARATFORG", "CANFINHOME", "CHAMBLFERT", "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON", "CUB",
+        "DEEPAKNITR", "ESCORTS", "EXIDEIND", "FEDERALBNK", "GNFC", "GODREJCP", "GODREJPROP", "GRANULES", "GUJGASLTD", "HAL",
+        "HINDPETRO", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "IPCALAB", "JKCEMENT", "JSWENERGY", "JUBLFOOD", "LALPATHLAB",
+        "LAURUSLABS", "LICHSGFIN", "LTTS", "LUPIN", "M&MFIN", "MARICO", "MCX", "METROPOLIS", "MFSL", "MGL",
+        "MPHASIS", "MRF", "MUTHOOTFIN", "NAM-INDIA", "NATCOPHARM", "NAVINFLUOR", "NAUKRI", "NLCINDIA", "NMDC", "OBEROIRLTY",
+        "OFSS", "PAGEIND", "PEL", "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND", "POLYCAB", "PVRINOX",
+        "RAMCOCEM", "RBLBANK", "RECLTD", "SAIL", "SBICARD", "SHREECEM", "SIEMENS", "SRF", "SUNTV", "SYNGENE",
+        "TATACOMM", "TATAMTRDVR", "TATACHEM", "TATAELXSI", "TATAPOWER", "TCS", "TECHM", "TITAN", "TORNTPHARM", "TORNTPOWER",
+        "TRENT", "TVSMOTOR", "UPL", "VEDL", "VOLTAS", "WHIRLPOOL", "WIPRO", "ZEEL", "ZYDUSLIFE"
     ]
-    extended_pool = [f"STOCK{i}" for i in range(1, 650)]
-    full_pool = market_cap_tier_1 + market_cap_tier_2 + market_cap_tier_3 + extended_pool
-    clean_pool = [f"{sym}.NS" for sym in dict.fromkeys(full_pool) if not sym.startswith("STOCK")]
-    return clean_pool
+    
+    for sym in fallback_pool:
+        stocks.add(f"{sym}.NS")
+        
+    return list(stocks)
 
 def compute_rsi(series, period=14):
     delta = series.diff()
@@ -343,8 +373,8 @@ def scan_3_ema_crossover_stock(ticker):
     return None
 
 def main():
-    print("Initializing Master Confluence Telegram Scanner...")
-    stocks = get_nifty_750_pool()
+    print("Initializing Master Confluence Telegram Scanner for Comprehensive Stock Universe...")
+    stocks = get_comprehensive_stock_pool()
     print(f"Loaded {len(stocks)} stocks into scanning pool.")
 
     # IST Conversion: 8:30 AM IST corresponds to 03:00 UTC
@@ -358,7 +388,7 @@ def main():
         momentum_matches = []
         ema_matches = []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
             gtf_results = executor.map(scan_weekly_stock, stocks)
             for r in gtf_results:
                 if r:
@@ -429,7 +459,7 @@ def main():
         today_str = datetime.now().strftime("%Y-%m-%d")
         matches = []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
             results = executor.map(scan_intraday_stock, stocks)
             for r in results:
                 if r:
@@ -456,7 +486,7 @@ def main():
                 sent_state[m['ticker']] = today_str
             save_sent_state(sent_state)
         else:
-            print("No top intraday confluence setups found in this 30-min cycle.")
+            print("No top intraday confluence setups found in this cycle.")
 
 if __name__ == "__main__":
     main()
