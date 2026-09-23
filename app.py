@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import datetime
 from datetime import datetime, time, timedelta
+import os
 from bs4 import BeautifulSoup
+from google import genai
 import numpy as np
 import pandas as pd
 import requests
@@ -57,7 +59,7 @@ def is_market_closed():
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, **Weekly Income Strategies**, and **HTML-Integrated Intraday/Weekly Hubs**."
+    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, **Weekly Income Strategies**, and **Google Gemini AI Live Chat Hub**."
 )
 
 # --- GLOBAL SCAN CONTROLS ---
@@ -97,7 +99,7 @@ if "strategy_scans" not in st.session_state:
 main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "📈 Live Strategies Hub",
     "📊 Backtesters Hub",
-    "🎯 HTML Scanner & Live Chat Hub",
+    "💬 Google Gemini Live Chat Hub",
     "📌 Terminal Info & Guide"
 ])
 
@@ -915,17 +917,14 @@ def fetch_html_weekly_strategy(symbols, top_n_count):
             if cmp < 50.0:
                 continue
             
-            # Check weekly base highs
             weekly_highs = df_weekly["High"].iloc[:-1].max() if len(df_weekly) > 1 else df_weekly["High"].max()
             near_base = cmp >= weekly_highs * 0.90
             
-            # Check for major daily price/volume movement in the ongoing/recent week
             recent_daily_vols = df_daily["Volume"].tail(5)
             daily_vol_mean = df_daily["Volume"].rolling(20).mean().iloc[-1] if len(df_daily) >= 20 else recent_daily_vols.mean()
             major_vol_movement = recent_daily_vols.iloc[-1] > (daily_vol_mean * 1.5) or (recent_daily_vols.max() > daily_vol_mean * 2.0)
             major_price_movement = df_daily["Close"].iloc[-1] > df_daily["Close"].iloc[-2] and df_daily["Close"].pct_change().tail(3).max() > 0.02
 
-            # Fallback/standard weekly completed volume expansion check
             completed_vols = df_weekly["Volume"].iloc[:-1]
             vol_mean = completed_vols.rolling(4).mean()
             vol_expansion = (completed_vols.iloc[-1] > vol_mean.iloc[-2]) if len(vol_mean) >= 2 else True
@@ -1404,97 +1403,52 @@ with main_tab2:
             st.info("Select a historical date and run the backtest to view weekly performance metrics.")
 
 
-# --- TAB 3: HTML SCANNER & LIVE CHAT HUB ---
-@st.cache_data(ttl=300)
-def fetch_html_integrated_scanner_data(symbols):
-    intra_res = []
-    weekly_res = []
-    
-    for sym in symbols[:50]:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        try:
-            t = yf.Ticker(f"{clean_sym}.NS")
-            df_intra = t.history(period="5d", interval="15m")
-            if not df_intra.empty:
-                cmp = round(float(df_intra.iloc[-1]["Close"]), 2)
-                intra_res.append({
-                    "Stock Name": clean_sym,
-                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
-                    "Cap Tier": "Mid/Large-Cap",
-                    "Reference Price (₹)": f"₹{cmp}",
-                    "Coiling / Setup Pattern": "15m Range Compression",
-                    "Trigger Condition": "Break above high on volume",
-                    "Watch Zone (₹)": f"₹{round(cmp*0.99, 2)} - ₹{round(cmp*1.01, 2)}",
-                    "Stop Loss (SL) (₹)": f"₹{round(cmp*0.98, 2)}",
-                    "Status": "Pre-Market Watch"
-                })
-
-            df_wk = t.history(period="3mo", interval="1wk")
-            if not df_wk.empty:
-                cmp_wk = float(df_wk.iloc[-1]["Close"])
-                weekly_res.append({
-                    "Stock Name": clean_sym,
-                    "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
-                    "Cap Tier": "Mid/Large-Cap",
-                    "Current Price (₹)": f"₹{cmp_wk}",
-                    "Base Formation": "Multi-Week Cup & Handle Base",
-                    "Indicator Setup": "Bollinger Squeeze + RSI > 55",
-                    "Entry Zone (₹)": f"₹{round(cmp_wk*0.99, 2)} - ₹{round(cmp_wk*1.01, 2)}",
-                    "Stop Loss (SL) (₹)": f"₹{round(cmp_wk*0.95, 2)}",
-                    "Target Outlook": f"₹{round(cmp_wk*1.10, 2)} / ₹{round(cmp_wk*1.15, 2)}",
-                    "Status": "Primed for Breakout"
-                })
-        except Exception:
-            continue
-            
-    return pd.DataFrame(intra_res).head(10), pd.DataFrame(weekly_res).head(10)
-
+# --- TAB 3: GOOGLE GEMINI LIVE CHAT HUB ---
 with main_tab3:
-    st.subheader("🎯 HTML Scanner Hub & Live Strategy Chat")
-    st.markdown("Integrated directly from your pre-breakout HTML dashboard with live market pricing, watch zones, stop losses, and target outlooks.")
+    st.subheader("💬 Google Gemini Live Strategy & Market Chat Hub")
+    st.markdown("Ask any question regarding market trends, stock analysis, entry/exit triggers, or trading strategies. Answers are generated live directly from **Google Gemini**.")
     
-    html_tab_choice = st.radio("Select View:", ["⚡ Intraday Pre-Market Prep Hub", "📅 Weekly Swing Bases Hub", "💬 Live Strategy Chat Assistant"], horizontal=True, key="html_radio")
+    # Optional API key configuration in sidebar if environment variable is not pre-set
+    gemini_api_key = st.sidebar.text_input("Gemini API Key (Optional if set in environment)", type="password", key="gemini_key_input")
     
-    df_html_intra, df_html_weekly = fetch_html_integrated_scanner_data(active_universe_pool)
-    
-    if html_tab_choice == "⚡ Intraday Pre-Market Prep Hub":
-        st.markdown("#### ⚡ Intraday Setup Scans (Live Price & Watch Zones)")
-        if not df_html_intra.empty:
-            render_native_table(df_html_intra, key_prefix="html_intra")
-        else:
-            st.info("Loading intraday prep data...")
-    elif html_tab_choice == "📅 Weekly Swing Bases Hub":
-        st.markdown("#### 📅 Weekly Swing Base Setups (Live Price, Entry, SL & Targets)")
-        if not df_html_weekly.empty:
-            render_native_table(df_html_weekly, key_prefix="html_weekly")
-        else:
-            st.info("Loading weekly swing data...")
-    else:
-        st.markdown("#### 💬 Live Strategy & Setup Chat")
-        st.markdown("Ask any question regarding intraday triggers, weekly swing targets, or risk management for these specific setups.")
+    if "chat_history" not in st.session_state:
+        st.session_state["chat_history"] = [
+            {"role": "assistant", "content": "Hello! I am your Google Gemini-powered trading and strategy assistant. How can I help you analyze the market or your setups today?"}
+        ]
         
-        if "chat_history" not in st.session_state:
-            st.session_state["chat_history"] = [
-                {"role": "assistant", "content": "Hello! I am your live strategy assistant connected to the HTML & Python scanning engine. How can I assist you with your intraday or weekly trades today?"}
-            ]
+    for msg in st.session_state["chat_history"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
             
-        for msg in st.session_state["chat_history"]:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+    user_query = st.chat_input("Ask Google Gemini any question about markets, stocks, or strategies...")
+    if user_query:
+        st.session_state["chat_history"].append({"role": "user", "content": user_query})
+        with st.chat_message("user"):
+            st.markdown(user_query)
+            
+        with st.spinner("Google Gemini is thinking..."):
+            try:
+                api_key_to_use = gemini_api_key if gemini_api_key else os.environ.get("GEMINI_API_KEY", "")
+                if not api_key_to_use and hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+                    api_key_to_use = st.secrets["GEMINI_API_KEY"]
                 
-        user_query = st.chat_input("Ask about an intraday stock, entry price, SL, or weekly base pattern...")
-        if user_query:
-            st.session_state["chat_history"].append({"role": "user", "content": user_query})
-            with st.chat_message("user"):
-                st.markdown(user_query)
+                if api_key_to_use:
+                    client = genai.Client(api_key=api_key_to_use)
+                else:
+                    client = genai.Client()
                 
-            bot_reply = f"I have received your query regarding '{user_query}'. All conditions from your HTML scanner and Python strategy engines across the chosen stock universe are fully integrated into this terminal."
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=user_query,
+                )
+                bot_reply = response.text
+            except Exception as e:
+                bot_reply = f"Error generating response from Google Gemini: {e}. Please ensure your Gemini API key is configured in your environment variables or sidebar input."
                 
-            st.session_state["chat_history"].append({"role": "assistant", "content": bot_reply})
-            with st.chat_message("assistant"):
-                st.markdown(bot_reply)
+        st.session_state["chat_history"].append({"role": "assistant", "content": bot_reply})
+        with st.chat_message("assistant"):
+            st.markdown(bot_reply)
+
 
 # --- TAB 4: TERMINAL INFO & GUIDE ---
 with main_tab4:
@@ -1502,9 +1456,9 @@ with main_tab4:
     st.markdown("""
     - **Tab 1 (Live Strategies Hub):** Use the radio button to switch between **Intraday Strategies** (Chartlink & HTML pre-market) and **Weekly & Swing Strategies** (GTF MTF, Vijay Thakkar, Daily Momentum, Elite Swing, and HTML Weekly Swing). Intraday scans automatically pre-qualify stocks meeting weekly/daily trend & pullback conditions.
     - **Tab 2 (Backtesters Hub):** Use the radio button to switch between the **Intraday Session Backtester** and the **Weekly / Swing Historical Backtester**.
-    - **Tab 3 (HTML Scanner & Live Chat Hub):** Direct integration of HTML dashboard scans and interactive AI trading assistant.
+    - **Tab 3 (Google Gemini Live Chat Hub):** Direct, interactive AI chat assistant powered by Google Gemini for any trading or market queries.
     - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
     """)
 
 st.markdown("---")
-st.markdown("📌 *All institutional strategies, weekly/daily condition pre-filters, rolling breakout checks, GTF MTF rules, and HTML scanner conditions remain fully intact.*")
+st.markdown("📌 *All institutional strategies, weekly/daily condition pre-filters, rolling breakout checks, and GTF MTF rules remain fully intact.*")
