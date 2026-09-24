@@ -66,23 +66,6 @@ st.markdown(
     "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, **Optimized Weekly Strategies**, and **Coiling Pre-Breakout Scans**."
 )
 
-# --- GLOBAL SCAN CONTROLS SIDEBAR ---
-with st.sidebar:
-    st.subheader("⚙️ Master Scan Configuration")
-    universe_limit = st.selectbox(
-        "Scan Universe Size (Top Nifty Market Cap):",
-        options=[50, 100, 200, 500, 750],
-        index=2,
-    )
-    selected_count = st.slider(
-        "Output Stock Count (Top N):",
-        min_value=3,
-        max_value=25,
-        value=10,
-        step=1,
-    )
-    st.markdown("---")
-
 market_status = (
     "🔴 CLOSED (Post-Market Mode Active)"
     if is_market_closed()
@@ -94,6 +77,25 @@ st.markdown("---")
 # Initialize Strategy Scan Storage in Session State
 if "strategy_scans" not in st.session_state:
     st.session_state["strategy_scans"] = {}
+
+# --- HORIZONTAL MASTER SCAN CONFIGURATION BAR ---
+st.subheader("⚙️ Master Scan Configuration")
+config_col1, config_col2 = st.columns(2)
+with config_col1:
+    universe_limit = st.selectbox(
+        "Scan Universe Size (Top Nifty Market Cap):",
+        options=[50, 100, 200, 500, 750],
+        index=2,
+    )
+with config_col2:
+    selected_count = st.slider(
+        "Output Stock Count (Top N):",
+        min_value=3,
+        max_value=25,
+        value=10,
+        step=1,
+    )
+st.markdown("---")
 
 # --- CONSOLIDATED 3-TAB LAYOUT ---
 main_tab1, main_tab2, main_tab3 = st.tabs([
@@ -1202,7 +1204,7 @@ with main_tab3:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
     - **Tab 1 (Live Strategies Hub):** Select **Weekly & Swing Strategies** and pick **Weekly Coiling & Pre-Breakout Strategy** to scan the Nifty universe using the coiling logic.
-    - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies from the sidebar.
+    - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies from the top configuration bar.
     """)
 
 st.markdown("---")
