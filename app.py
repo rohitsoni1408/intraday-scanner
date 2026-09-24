@@ -60,52 +60,20 @@ def is_market_closed():
     return not (market_open <= now.time() <= market_close)
 
 
-# --- TELEGRAM ALERT HELPER ---
-def send_telegram_alert(message):
-    token = st.session_state.get("tg_token", "")
-    chat_id = st.session_state.get("tg_chat_id", "")
-    if not token or not chat_id:
-        return False
-    try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
-        response = requests.post(url, json=payload, timeout=5)
-        return response.status_code == 200
-    except Exception:
-        return False
-
-
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
 st.markdown(
     "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, **Optimized Weekly Strategies**, and **Coiling Pre-Breakout Scans**."
 )
 
-# --- GLOBAL SCAN CONTROLS & TELEGRAM SETTINGS SIDEBAR ---
+# --- GLOBAL SCAN CONTROLS SIDEBAR ---
 with st.sidebar:
-    st.subheader("🔔 Telegram Alert Settings")
-    st.session_state["tg_token"] = st.text_input("Telegram Bot Token", type="password", value=st.session_state.get("tg_token", ""))
-    st.session_state["tg_chat_id"] = st.text_input("Telegram Chat ID", value=st.session_state.get("tg_chat_id", ""))
-    if st.button("Test Telegram Alert"):
-        success = send_telegram_alert("🚀 *Test Alert:* NSE Terminal Connected Successfully!")
-        if success:
-            st.success("Alert sent successfully!")
-        else:
-            st.error("Failed. Check Bot Token & Chat ID.")
-    st.markdown("---")
-
-st.subheader("⚙️ Master Scan Configuration")
-col_info, col_slider1, col_slider2 = st.columns([2, 1, 1])
-
-with col_info:
-    market_status = (
-        "🔴 CLOSED (Post-Market Mode Active)"
-        if is_market_closed()
-        else "🟢 OPEN (Live Scanning Active)"
+    st.subheader("⚙️ Master Scan Configuration")
+    universe_limit = st.selectbox(
+        "Scan Universe Size (Top Nifty Market Cap):",
+        options=[50, 100, 200, 500, 750],
+        index=2,
     )
-    st.markdown(f"**Market Status:** {market_status}")
-
-with col_slider1:
     selected_count = st.slider(
         "Output Stock Count (Top N):",
         min_value=3,
@@ -113,13 +81,14 @@ with col_slider1:
         value=10,
         step=1,
     )
-with col_slider2:
-    universe_limit = st.selectbox(
-        "Scan Universe Size (Top Nifty Market Cap):",
-        options=[50, 100, 200, 500, 750],
-        index=2,
-    )
+    st.markdown("---")
 
+market_status = (
+    "🔴 CLOSED (Post-Market Mode Active)"
+    if is_market_closed()
+    else "🟢 OPEN (Live Scanning Active)"
+)
+st.markdown(f"**Market Status:** {market_status}")
 st.markdown("---")
 
 # Initialize Strategy Scan Storage in Session State
@@ -736,13 +705,9 @@ def fetch_3_ema_crossover_strategy(symbols, top_n_count):
     return df_res
 
 
-# --- NEW INTEGRATED HTML WEEKLY TRADE STRATEGY & COILING SCANNER ---
+# --- INTEGRATED HTML WEEKLY TRADE STRATEGY & COILING SCANNER ---
 @st.cache_data(ttl=300)
 def fetch_weekly_trade_coiling_strategy(symbols, top_n_count):
-    """
-    Python equivalent of the HTML Weekly Trade Strategy & Coiling Base Scanner.
-    Scans universe for range compression, coiling patterns, Bollinger / VCP squeezes, and volume dry-ups.
-    """
     results = []
     for sym in symbols:
         clean_sym = sym.upper().strip()
@@ -761,19 +726,15 @@ def fetch_weekly_trade_coiling_strategy(symbols, top_n_count):
             if cmp < 50.0:
                 continue
 
-            # Coiling & Volatility Squeeze Calculations
             recent_highs = df_daily["High"].tail(10).max()
             recent_lows = df_daily["Low"].tail(10).min()
             range_pct = (recent_highs - recent_lows) / cmp
 
             rsi_val = compute_rsi(df_daily["Close"], period=14).iloc[-1]
-            sma20 = df_daily["Close"].rolling(20).mean().iloc[-1]
 
-            # Filter for coiling / squeeze conditions
             if range_pct > 0.08 or rsi_val < 45:
                 continue
 
-            # Determine market cap category tier dynamically based on index position
             cap_tier = "Large-Cap" if symbols.index(sym) < 40 else ("Mid-Cap" if symbols.index(sym) < 120 else "Small-Cap")
 
             pattern = "5-Week Cup & Handle Base" if range_pct < 0.04 else "Volatility Contraction Range (VCP)"
@@ -871,11 +832,9 @@ def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_po
                 status, pnl_val, win_prob = ("⏳ Active (Within 4W)", pnl, "65.0%")
                 raw_score = 65.0 + pnl
 
-            signal_label = selected_strategy
-
             results.append({
                 "Symbol": clean_sym,
-                "Signal": signal_label,
+                "Signal": selected_strategy,
                 "Win Probability (%)": win_prob,
                 "Entry Date": target_date.strftime("%Y-%m-%d"),
                 "Tight Entry (₹)": f"₹{entry_price}",
@@ -1054,7 +1013,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
 
 active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
-# --- TAB 1: LIVE STRATEGIES HUB (RADIO BUTTON TOGGLE) ---
+# --- TAB 1: LIVE STRATEGIES HUB ---
 with main_tab1:
     st.subheader("📈 Live Strategy Scanners Hub")
     
@@ -1085,11 +1044,6 @@ with main_tab1:
 
                 st.session_state["strategy_scans"]["Combined Intraday Strategy"] = (df_b, df_s)
                 st.success("Combined intraday scan completed successfully!")
-
-                # Send Telegram alert for top buy/sell signals if configured
-                if not df_b.empty:
-                    top_syms = ", ".join(df_b["Symbol"].head(3).tolist())
-                    send_telegram_alert(f"🎯 *Intraday Buy Signals Found!*\nTop Picks: {top_syms}")
 
         cached_intra_scan = st.session_state["strategy_scans"].get("Combined Intraday Strategy", (pd.DataFrame(), pd.DataFrame()))
         df_b, df_s = cached_intra_scan
@@ -1139,11 +1093,6 @@ with main_tab1:
                 st.session_state["strategy_scans"][selected_weekly_strategy] = df_res
                 st.success("Scan completed successfully!")
 
-                # Send Telegram alert for weekly signals
-                if not df_res.empty:
-                    top_syms = ", ".join(df_res["Symbol"].head(3).tolist())
-                    send_telegram_alert(f"📅 *{selected_weekly_strategy} Scanned!*\nTop Picks: {top_syms}")
-
         df_weekly_res = st.session_state["strategy_scans"].get(selected_weekly_strategy, pd.DataFrame())
         if not df_weekly_res.empty:
             render_native_table(df_weekly_res.head(selected_count), key_prefix=f"strategy_tab_{selected_weekly_strategy}")
@@ -1151,7 +1100,7 @@ with main_tab1:
             st.info("Select a strategy above and click the button to view live signals.")
 
 
-# --- TAB 2: BACKTESTERS HUB (RADIO BUTTON TOGGLE) ---
+# --- TAB 2: BACKTESTERS HUB ---
 with main_tab2:
     st.subheader("📊 Strategy Backtesters Hub")
     
@@ -1253,9 +1202,8 @@ with main_tab3:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
     - **Tab 1 (Live Strategies Hub):** Select **Weekly & Swing Strategies** and pick **Weekly Coiling & Pre-Breakout Strategy** to scan the Nifty universe using the coiling logic.
-    - **Telegram Alerts:** Enter your Telegram Bot Token and Chat ID in the sidebar to receive instant automated notifications on scan completion.
-    - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies.
+    - **Master Controls:** Universe limits and stock output counts apply uniformly across all active strategies from the sidebar.
     """)
 
 st.markdown("---")
-st.markdown("📌 *All institutional strategies, weekly coiling pre-breakout scans, Telegram alerts, and backtesting frameworks remain fully intact.*")
+st.markdown("📌 *All institutional strategies, weekly coiling pre-breakout scans, and backtesting frameworks remain fully active.*")
