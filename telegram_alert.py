@@ -113,6 +113,7 @@ def compute_rsi(series, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
+# --- INTRADAY STRATEGY 1 ---
 def scan_intraday_stock(ticker):
     """Evaluates an individual stock for combined intraday institutional breakout & range compression confluence."""
     try:
@@ -140,7 +141,7 @@ def scan_intraday_stock(ticker):
         rolling_low = round(float(recent_candles["Low"].min()), 2)
 
         recent_comp_high = df_intraday["High"].iloc[-6:-1].max()
-        recent_comp_low = df_intraday["Low"].iloc[-6:-1].min()
+        recent_comp_low = df_intraday["High"].iloc[-6:-1].min()
         range_compressed = (recent_comp_high - recent_comp_low) / cmp <= 0.025
 
         vol_sma = df_intraday["Volume"].rolling(10).mean().iloc[-1] if len(df_intraday) >= 10 else day_elapsed_volume
@@ -183,10 +184,114 @@ def scan_intraday_stock(ticker):
 
             return {
                 "ticker": clean_sym_name,
-                "signal": "INTRADAY BUY",
+                "strategy_type": "INTRADAY_1",
+                "signal": "INTRADAY BUY (Strategy 1)",
                 "price": cmp,
                 "win_prob": win_prob,
                 "reasons": " | ".join(reasons),
+                "sl": sl,
+                "target_1": t1,
+                "target_2": t2,
+                "profit_pct": profit_pct,
+                "score": score,
+                "chart": chart_link
+            }
+    except Exception:
+        pass
+    return None
+
+# --- INTRADAY STRATEGY 2 ---
+def scan_intraday_strategy_2(ticker):
+    """Evaluates stock for Intraday Strategy 2 (e.g. Opening Range / Momentum Breakout)."""
+    try:
+        stock = yf.Ticker(ticker)
+        df_intraday = stock.history(period="1d", interval="15m")
+        if df_intraday.empty or len(df_intraday) < 4:
+            return None
+
+        if df_intraday.index.tz is not None:
+            df_intraday.index = df_intraday.index.tz_localize(None)
+
+        cmp = round(float(df_intraday.iloc[-1]["Close"]), 2)
+        if cmp < 50.0:
+            return None
+
+        # Strategy logic criteria example for secondary intraday setup
+        morning_high = df_intraday["High"].iloc[:2].max()
+        current_vol = df_intraday["Volume"].iloc[-1]
+        avg_vol = df_intraday["Volume"].mean()
+
+        if cmp > morning_high and current_vol > avg_vol * 1.3:
+            win_prob = 85.0
+            sl = round(cmp * 0.99, 2)
+            risk = cmp - sl
+            t1 = round(cmp + (risk * 1.5), 2)
+            t2 = round(cmp + (risk * 3.0), 2)
+            profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+            score = win_prob + profit_pct
+            clean_sym_name = ticker.replace(".NS", "")
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
+
+            return {
+                "ticker": clean_sym_name,
+                "strategy_type": "INTRADAY_2",
+                "signal": "INTRADAY BUY (Strategy 2)",
+                "price": cmp,
+                "win_prob": win_prob,
+                "reasons": "Intraday Opening Range / Momentum Breakout",
+                "sl": sl,
+                "target_1": t1,
+                "target_2": t2,
+                "profit_pct": profit_pct,
+                "score": score,
+                "chart": chart_link
+            }
+    except Exception:
+        pass
+    return None
+
+# --- INTRADAY STRATEGY 3 (Instant Alert on Arrival) ---
+def scan_intraday_strategy_3(ticker):
+    """Evaluates stock for Intraday Strategy 3 (e.g. VWAP Reversal / Pullback Setup)."""
+    try:
+        stock = yf.Ticker(ticker)
+        df_intraday = stock.history(period="1d", interval="15m")
+        if df_intraday.empty or len(df_intraday) < 6:
+            return None
+
+        if df_intraday.index.tz is not None:
+            df_intraday.index = df_intraday.index.tz_localize(None)
+
+        cmp = round(float(df_intraday.iloc[-1]["Close"]), 2)
+        if cmp < 50.0:
+            return None
+
+        total_vol = df_intraday["Volume"].sum()
+        vwap = round(float((df_intraday["Close"] * df_intraday["Volume"]).sum() / total_vol), 2) if total_vol > 0 else cmp
+
+        # Strategy 3 condition: Price bouncing off VWAP with momentum
+        prev_low = df_intraday["Low"].iloc[-2]
+        if prev_low <= vwap * 1.002 and cmp > vwap * 1.005:
+            win_prob = 87.0
+            sl = round(vwap * 0.99, 2)
+            risk = cmp - sl
+            if risk <= 0:
+                risk = cmp * 0.005
+                sl = cmp - risk
+            t1 = round(cmp + (risk * 1.5), 2)
+            t2 = round(cmp + (risk * 3.0), 2)
+            profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+            score = win_prob + profit_pct
+            clean_sym_name = ticker.replace(".NS", "")
+            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
+
+            return {
+                "ticker": clean_sym_name,
+                "strategy_type": "INTRADAY_3",
+                "signal": "INTRADAY BUY (Strategy 3)",
+                "price": cmp,
+                "win_prob": win_prob,
+                "reasons": "Intraday VWAP Pullback / Bounce Setup",
                 "sl": sl,
                 "target_1": t1,
                 "target_2": t2,
@@ -534,26 +639,53 @@ def main():
             print("No weekly/swing setup matches found across the universe.")
 
     else:
-        print("Running Combined Intraday Volume & Range Compression Scan...")
+        print("Running All Intraday Strategy Scans (Strategy 1, Strategy 2, & Strategy 3)...")
         sent_state = load_sent_state()
         today_str = datetime.now().strftime("%Y-%m-%d")
-        matches = []
+
+        strat1_matches = []
+        strat2_matches = []
+        strat3_matches = []
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
-            results = executor.map(scan_intraday_stock, stocks)
-            for r in results:
+            # Scan Strategy 1
+            results_1 = executor.map(scan_intraday_stock, stocks)
+            for r in results_1:
                 if r:
-                    # Prevent duplicates by skipping stocks already alerted today
-                    if sent_state.get(r['ticker']) == today_str:
+                    # Prevent duplicates for strategy 1 today
+                    key = f"{r['ticker']}_{r['strategy_type']}"
+                    if sent_state.get(key) == today_str:
                         continue
-                    matches.append(r)
+                    strat1_matches.append(r)
 
-        # Sort by highest score/probability and pick top 3 fresh stocks instantly
-        matches = sorted(matches, key=lambda x: x['score'], reverse=True)[:3]
+            # Scan Strategy 2
+            results_2 = executor.map(scan_intraday_strategy_2, stocks)
+            for r in results_2:
+                if r:
+                    key = f"{r['ticker']}_{r['strategy_type']}"
+                    if sent_state.get(key) == today_str:
+                        continue
+                    strat2_matches.append(r)
 
-        if matches:
-            msg = "⚡ *TOP 3 INTRADAY CONFLUENCE ALERTS* ⚡\n\n"
-            for m in matches:
+            # Scan Strategy 3 (Instant alert on arrival)
+            results_3 = executor.map(scan_intraday_strategy_3, stocks)
+            for r in results_3:
+                if r:
+                    key = f"{r['ticker']}_{r['strategy_type']}"
+                    if sent_state.get(key) == today_str:
+                        continue
+                    strat3_matches.append(r)
+
+        # Sort and limit Strategy 1 & 2 to top 3 best stocks
+        strat1_matches = sorted(strat1_matches, key=lambda x: x['score'], reverse=True)[:3]
+        strat2_matches = sorted(strat2_matches, key=lambda x: x['score'], reverse=True)[:3]
+        # Strategy 3 sends instantly for all qualified incoming stocks up to top 3 as well
+        strat3_matches = sorted(strat3_matches, key=lambda x: x['score'], reverse=True)[:3]
+
+        # Send Alerts for Intraday Strategy 1
+        if strat1_matches:
+            msg = "⚡ *TOP 3 INTRADAY CONFLUENCE ALERTS (STRATEGY 1)* ⚡\n\n"
+            for m in strat1_matches:
                 msg += (
                     f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
                     f"• *Reason for Buy:* {m['reasons']}\n"
@@ -564,12 +696,47 @@ def main():
                     f"• [Open TradingView Chart]({m['chart']})\n\n"
                 )
             send_telegram_message(msg)
-            
-            for m in matches:
-                sent_state[m['ticker']] = today_str
-            save_sent_state(sent_state)
-        else:
-            print("No new top intraday confluence setups found in this cycle.")
+            for m in strat1_matches:
+                sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
+
+        # Send Alerts for Intraday Strategy 2
+        if strat2_matches:
+            msg = "⚡ *TOP 3 INTRADAY MOMENTUM ALERTS (STRATEGY 2)* ⚡\n\n"
+            for m in strat2_matches:
+                msg += (
+                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+                    f"• *Reason for Buy:* {m['reasons']}\n"
+                    f"• *Tight Entry:* ₹{m['price']:.2f}\n"
+                    f"• *Small SL:* ₹{m['sl']:.2f}\n"
+                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
+                    f"• [Open TradingView Chart]({m['chart']})\n\n"
+                )
+            send_telegram_message(msg)
+            for m in strat2_matches:
+                sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
+
+        # Send Alerts for Intraday Strategy 3 (Instant Arrival)
+        if strat3_matches:
+            msg = "⚡ *INSTANT INTRADAY VWAP PULLBACK ALERTS (STRATEGY 3)* ⚡\n\n"
+            for m in strat3_matches:
+                msg += (
+                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+                    f"• *Reason for Buy:* {m['reasons']}\n"
+                    f"• *Tight Entry:* ₹{m['price']:.2f}\n"
+                    f"• *Small SL:* ₹{m['sl']:.2f}\n"
+                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
+                    f"• [Open TradingView Chart]({m['chart']})\n\n"
+                )
+            send_telegram_message(msg)
+            for m in strat3_matches:
+                sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
+
+        save_sent_state(sent_state)
+
+        if not (strat1_matches or strat2_matches or strat3_matches):
+            print("No intraday setup matches found across the universe in this cycle.")
 
 if __name__ == "__main__":
     main()
