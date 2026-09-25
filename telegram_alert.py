@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-import os
-import json
-from datetime import datetime, timezone
 import concurrent.futures
-import requests
+from datetime import datetime, timezone
+import json
+import os
 import pandas as pd
+import requests
 import yfinance as yf
 
 # Telegram Configuration from GitHub Secrets
@@ -13,730 +13,791 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 STATE_FILE = "sent_intraday_stocks.json"
 
+
 def send_telegram_message(message):
-    """Sends an alert message to the configured Telegram chat."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram credentials missing!")
-        return
-    
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": True
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        if response.status_code != 200:
-            print(f"Telegram API Error: {response.text}")
-    except Exception as e:
-        print(f"Failed to send Telegram message: {e}")
+  """Sends an alert message to the configured Telegram chat."""
+  if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    print("Telegram credentials missing!")
+    return
+
+  url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+  payload = {
+      "chat_id": TELEGRAM_CHAT_ID,
+      "text": message,
+      "parse_mode": "Markdown",
+      "disable_web_page_preview": True,
+  }
+  try:
+    response = requests.post(url, json=payload, timeout=10)
+    if response.status_code != 200:
+      print(f"Telegram API Error: {response.text}")
+  except Exception as e:
+    print(f"Failed to send Telegram message: {e}")
+
 
 def load_sent_state():
-    """Loads state to avoid duplicate intraday alerts during the same session."""
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+  """Loads state to avoid duplicate intraday alerts during the same session."""
+  if os.path.exists(STATE_FILE):
+    try:
+      with open(STATE_FILE, "r") as f:
+        return json.load(f)
+    except Exception:
+      return {}
+  return {}
+
 
 def save_sent_state(state):
-    """Saves the current alert state to disk."""
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f)
-    except Exception as e:
-        print(f"Failed to save state: {e}")
+  """Saves the current alert state to disk."""
+  try:
+    with open(STATE_FILE, "w") as f:
+      json.dump(state, f)
+  except Exception as e:
+    print(f"Failed to save state: {e}")
+
+
+def get_latest_news(ticker_sym):
+  """Fetches the latest news headline for the stock using yfinance."""
+  try:
+    ticker = yf.Ticker(ticker_sym)
+    news_list = ticker.news
+    if news_list and len(news_list) > 0:
+      item = news_list[0]
+      if "content" in item and isinstance(item["content"], dict):
+        return item["content"].get("title", "")
+      elif "title" in item:
+        return item["title"]
+  except Exception:
+    pass
+  return ""
+
 
 def get_comprehensive_stock_pool():
-    """
-    Dynamically fetches the Nifty 500 universe from NSE archives 
-    and combines it with a robust liquid stock pool.
-    """
-    stocks = set()
-    
-    # 1. Try fetching official Nifty 500 list from NSE archives
-    try:
-        url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            from io import StringIO
-            df_nifty = pd.read_csv(StringIO(response.text))
-            if "Symbol" in df_nifty.columns:
-                for sym in df_nifty["Symbol"].dropna():
-                    clean_sym = str(sym).strip().upper()
-                    if clean_sym:
-                        stocks.add(f"{clean_sym}.NS")
-                print(f"Successfully loaded {len(stocks)} symbols from official Nifty 500 index.")
-    except Exception as e:
-        print(f"Could not fetch live Nifty 500 list: {e}. Using fallback pool.")
+  """Dynamically fetches the Nifty universe or robust high-liquidity pool."""
+  stocks = set()
+  try:
+    url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    response = requests.get(url, headers=headers, timeout=10)
+    if response.status_code == 200:
+      from io import StringIO
 
-    # 2. Comprehensive High-Liquidity Fallback Pool (F&O + Nifty 100/200/500/Midcap)
-    fallback_pool = [
-        "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", "SBIN", "LTIM", "ITC", "HINDUNILVR",
-        "LT", "BAJFINANCE", "AXISBANK", "KOTAKBANK", "MARUTI", "SUNPHARMA", "TITAN", "ULTRACEMCO", "NTPC", "ONGC",
-        "POWERGRID", "ASIANPAINT", "ADANIENT", "ADANIPORTS", "COALINDIA", "TATASTEEL", "HINDALCO", "GRASIM", "TECHM", "WIPRO",
-        "BAJAJFINSV", "SBILIFE", "HDFCLIFE", "DIVISLAB", "CIPLA", "EICHERMOT", "BPCL", "TATAMOTORS", "HEROMOTOCO", "BRITANNIA",
-        "INDUSINDBK", "JSWSTEEL", "APOLLOHOSP", "DRREDDY", "SHRIRAMFIN", "M&M", "NESTLEIND", "TATACONSUM", "BAJAJ-AUTO", "HCLTECH",
-        "SBICARD", "PIDILITIND", "SRF", "ATGL", "ADANIGREEN", "ADANIPOWER", "HAL", "BEL", "IOC", "GAIL",
-        "ZOMATO", "PAYTM", "NYKAA", "POLICYBZR", "DELHIVERY", "DMART", "LUPIN", "TORNTPHARM", "CANBK", "PNB",
-        "BANKBARODA", "CHOLAFIN", "MUTHOOTFIN", "RECLTD", "PFC", "NHPC", "SJVN", "IRFC", "RVNL", "CONCOR",
-        "TRENT", "ASHOKLEY", "BOSCHLTD", "INDIGO", "NAUKRI", "MCDOWELL-N", "UPL", "AMBUJACEM", "ACC", "PAGEIND",
-        "PERSISTENT", "COFORGE", "MPHASIS", "LTTS", "OFSS", "POLYCAB", "DIXON", "ASTRAL", "SUPREMEIND", "BHARATFORG",
-        "ABFRL", "JUBLFOOD", "DEVYANI", "BEML", "CUMMINSIND", "SIEMENS", "ABB", "SCHAEFFLER", "THERMAX", "VOLTAS",
-        "HAVELLS", "WHIRLPOOL", "CROMPTON", "MANYAVAR", "METROPOLIS", "LALPATHLAB", "SYNGENE", "IPCALAB", "GLENMARK", "AIAENG",
-        "POLYCAB", "KPITTECH", "PERSISTENT", "COFORGE", "MUTHOOTFIN", "MANAPPURAM", "IBULHSGFIN", "AARTIIND", "ALKEM", "APOLLOTYRE",
-        "BALKRISIND", "BATAINDIA", "BHARATFORG", "CANFINHOME", "CHAMBLFERT", "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON", "CUB",
-        "DEEPAKNITR", "ESCORTS", "EXIDEIND", "FEDERALBNK", "GNFC", "GODREJCP", "GODREJPROP", "GRANULES", "GUJGASLTD", "HAL",
-        "HINDPETRO", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "IPCALAB", "JKCEMENT", "JSWENERGY", "JUBLFOOD", "LALPATHLAB",
-        "LAURUSLABS", "LICHSGFIN", "LTTS", "LUPIN", "M&MFIN", "MARICO", "MCX", "METROPOLIS", "MFSL", "MGL",
-        "MPHASIS", "MRF", "MUTHOOTFIN", "NAM-INDIA", "NATCOPHARM", "NAVINFLUOR", "NAUKRI", "NLCINDIA", "NMDC", "OBEROIRLTY",
-        "OFSS", "PAGEIND", "PEL", "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND", "POLYCAB", "PVRINOX",
-        "RAMCOCEM", "RBLBANK", "RECLTD", "SAIL", "SBICARD", "SHREECEM", "SIEMENS", "SRF", "SUNTV", "SYNGENE",
-        "TATACOMM", "TATAMTRDVR", "TATACHEM", "TATAELXSI", "TATAPOWER", "TCS", "TECHM", "TITAN", "TORNTPHARM", "TORNTPOWER",
-        "TRENT", "TVSMOTOR", "UPL", "VEDL", "VOLTAS", "WHIRLPOOL", "WIPRO", "ZEEL", "ZYDUSLIFE"
-    ]
-    
-    for sym in fallback_pool:
-        stocks.add(f"{sym}.NS")
-        
-    return list(stocks)
+      df_nifty = pd.read_csv(StringIO(response.text))
+      if "Symbol" in df_nifty.columns:
+        for sym in df_nifty["Symbol"].dropna():
+          clean_sym = str(sym).strip().upper()
+          if clean_sym:
+            stocks.add(f"{clean_sym}.NS")
+  except Exception:
+    pass
+
+  fallback_pool = [
+      "RELIANCE",
+      "TCS",
+      "HDFCBANK",
+      "ICICIBANK",
+      "INFY",
+      "BHARTIARTL",
+      "SBIN",
+      "LTIM",
+      "ITC",
+      "HINDUNILVR",
+      "LT",
+      "BAJFINANCE",
+      "AXISBANK",
+      "KOTAKBANK",
+      "MARUTI",
+      "SUNPHARMA",
+      "TITAN",
+      "ULTRACEMCO",
+      "NTPC",
+      "ONGC",
+      "POWERGRID",
+      "ASIANPAINT",
+      "ADANIENT",
+      "ADANIPORTS",
+      "COALINDIA",
+      "TATASTEEL",
+      "HINDALCO",
+      "GRASIM",
+      "TECHM",
+      "WIPRO",
+      "BAJAJFINSV",
+      "SBILIFE",
+      "HDFCLIFE",
+      "DIVISLAB",
+      "CIPLA",
+      "EICHERMOT",
+      "BPCL",
+      "TATAMOTORS",
+      "HEROMOTOCO",
+      "BRITANNIA",
+      "INDUSINDBK",
+      "JSWSTEEL",
+      "APOLLOHOSP",
+      "DRREDDY",
+      "SHRIRAMFIN",
+      "M&M",
+      "NESTLEIND",
+      "TATACONSUM",
+      "BAJAJ-AUTO",
+      "HCLTECH",
+      "SBICARD",
+      "PIDILITIND",
+      "SRF",
+      "ATGL",
+      "ADANIGREEN",
+      "ADANIPOWER",
+      "HAL",
+      "BEL",
+      "IOC",
+      "GAIL",
+      "ZOMATO",
+      "PAYTM",
+      "NYKAA",
+      "POLICYBZR",
+      "DELHIVERY",
+      "DMART",
+      "LUPIN",
+      "TORNTPHARM",
+      "CANBK",
+      "PNB",
+      "BANKBARODA",
+      "CHOLAFIN",
+      "MUTHOOTFIN",
+      "RECLTD",
+      "PFC",
+      "NHPC",
+      "SJVN",
+      "IRFC",
+      "RVNL",
+      "CONCOR",
+      "TRENT",
+      "ASHOKLEY",
+      "BOSCHLTD",
+      "INDIGO",
+      "NAUKRI",
+      "MCDOWELL-N",
+      "UPL",
+      "AMBUJACEM",
+      "ACC",
+      "PAGEIND",
+      "PERSISTENT",
+      "COFORGE",
+      "MPHASIS",
+      "LTTS",
+      "OFSS",
+      "POLYCAB",
+      "DIXON",
+      "ASTRAL",
+      "SUPREMEIND",
+      "BHARATFORG",
+  ]
+  for sym in fallback_pool:
+    stocks.add(f"{sym}.NS")
+  return list(stocks)
+
 
 def compute_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).ewm(alpha=1 / period, adjust=False).mean()
-    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1 / period, adjust=False).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+  delta = series.diff()
+  gain = (delta.where(delta > 0, 0)).ewm(alpha=1 / period, adjust=False).mean()
+  loss = (-delta.where(delta < 0, 0)).ewm(alpha=1 / period, adjust=False).mean()
+  rs = gain / loss
+  return 100 - (100 / (1 + rs))
 
-# --- INTRADAY STRATEGY 1 ---
-def scan_intraday_stock(ticker):
-    """Evaluates an individual stock for combined intraday institutional breakout & range compression confluence."""
-    try:
-        stock = yf.Ticker(ticker)
-        df_intraday = stock.history(period="2d", interval="15m")
-        if df_intraday.empty or len(df_intraday) < 15:
-            return None
 
-        if df_intraday.index.tz is not None:
-            df_intraday.index = df_intraday.index.tz_localize(None)
+# --- INTRADAY STRATEGY 1: Combined Intraday Confluence ---
+def scan_combined_intraday(ticker):
+  try:
+    stock = yf.Ticker(ticker)
+    df_intraday = stock.history(period="2d", interval="15m")
+    if df_intraday.empty or len(df_intraday) < 15:
+      return None
 
-        latest_date = df_intraday.index[-1].normalize()
-        df_today = df_intraday[df_intraday.index.normalize() == latest_date]
-        day_elapsed_volume = int(df_today["Volume"].sum()) if not df_today.empty else int(df_intraday["Volume"].sum())
+    if df_intraday.index.tz is not None:
+      df_intraday.index = df_intraday.index.tz_localize(None)
 
-        cmp = round(float(df_intraday.iloc[-1]["Close"]), 2)
-        if cmp < 50.0:
-            return None
+    latest_date = df_intraday.index[-1].normalize()
+    df_today = df_intraday[df_intraday.index.normalize() == latest_date]
+    day_elapsed_vol = (
+        int(df_today["Volume"].sum())
+        if not df_today.empty
+        else int(df_intraday["Volume"].sum())
+    )
 
-        total_vol = df_intraday["Volume"].sum()
-        vwap = round(float((df_intraday["Close"] * df_intraday["Volume"]).sum() / total_vol), 2) if total_vol > 0 else cmp
+    cmp = round(float(df_intraday.iloc[-1]["Close"]), 2)
+    if cmp < 50.0:
+      return None
 
-        recent_candles = df_intraday.iloc[:-1].tail(12)
-        rolling_high = round(float(recent_candles["High"].max()), 2)
-        rolling_low = round(float(recent_candles["Low"].min()), 2)
+    total_vol = df_intraday["Volume"].sum()
+    vwap = (
+        round(
+            float(
+                (df_intraday["Close"] * df_intraday["Volume"]).sum() / total_vol
+            ),
+            2,
+        )
+        if total_vol > 0
+        else cmp
+    )
 
-        recent_comp_high = df_intraday["High"].iloc[-6:-1].max()
-        recent_comp_low = df_intraday["High"].iloc[-6:-1].min()
-        range_compressed = (recent_comp_high - recent_comp_low) / cmp <= 0.025
+    recent_candles = df_intraday.iloc[:-1].tail(12)
+    rolling_high = round(float(recent_candles["High"].max()), 2)
+    rolling_low = round(float(recent_candles["Low"].min()), 2)
 
-        vol_sma = df_intraday["Volume"].rolling(10).mean().iloc[-1] if len(df_intraday) >= 10 else day_elapsed_volume
-        vol_spike = df_intraday["Volume"].iloc[-1] > (vol_sma * 1.5)
-        exceptional_vol = day_elapsed_volume >= 120000
+    recent_comp_high = df_intraday["High"].iloc[-6:-1].max()
+    recent_comp_low = df_intraday["High"].iloc[-6:-1].min()
+    range_compressed = (recent_comp_high - recent_comp_low) / cmp <= 0.025
 
-        rsi_15m = compute_rsi(df_intraday["Close"], period=14)
-        curr_rsi = float(rsi_15m.iloc[-1])
-        prev_rsi = float(rsi_15m.iloc[-6])
-        curr_price_low = float(df_intraday["Low"].iloc[-1])
-        prev_price_low = float(df_intraday["Low"].iloc[-6])
+    vol_sma = (
+        df_intraday["Volume"].rolling(10).mean().iloc[-1]
+        if len(df_intraday) >= 10
+        else day_elapsed_vol
+    )
+    vol_spike = df_intraday["Volume"].iloc[-1] > (vol_sma * 1.5)
+    exceptional_vol = day_elapsed_vol >= 120000
 
-        rsi_bull_div = (curr_price_low <= prev_price_low) and (curr_rsi > prev_rsi)
-        is_bullish_setup = (cmp > rolling_high or (range_compressed and cmp >= vwap)) and (cmp >= vwap * 0.995)
+    rsi_15m = compute_rsi(df_intraday["Close"], period=14)
+    curr_rsi = float(rsi_15m.iloc[-1])
+    prev_rsi = float(rsi_15m.iloc[-6])
+    curr_price_low = float(df_intraday["Low"].iloc[-1])
+    prev_price_low = float(df_intraday["Low"].iloc[-6])
 
-        if is_bullish_setup:
-            base_prob = 84.5
-            reasons = ["Weekly/Daily Trend + Intraday Confluence"]
-            if exceptional_vol or vol_spike:
-                base_prob += 6.5
-                reasons.append("High Volume Expansion & Spike")
-            if rsi_bull_div:
-                base_prob += 4.2
-                reasons.append("15m RSI Bullish Divergence")
-            if range_compressed:
-                reasons.append("15m Range Compression Breakout")
+    rsi_bull_div = (curr_price_low <= prev_price_low) and (
+        curr_rsi > prev_rsi
+    )
+    is_bullish_setup = (
+        cmp > rolling_high or (range_compressed and cmp >= vwap)
+    ) and (cmp >= vwap * 0.995)
 
-            win_prob = round(min(base_prob, 97.5), 1)
-            sl = round(min(rolling_low, cmp * 0.992), 2)
-            risk = cmp - sl
-            if risk <= 0:
-                risk = cmp * 0.005
-                sl = cmp - risk
-            t1 = round(cmp + (risk * 1.5), 2)
-            t2 = round(cmp + (risk * 3.0), 2)
-            profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
-            score = win_prob + profit_pct
-            clean_sym_name = ticker.replace(".NS", "")
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
+    if is_bullish_setup:
+      base_prob = 84.5
+      reasons = ["Daily Trend + Intraday Confluence"]
+      if exceptional_vol or vol_spike:
+        base_prob += 6.5
+        reasons.append("High Volume Expansion & Spike")
+      if rsi_bull_div:
+        base_prob += 4.2
+        reasons.append("15m RSI Bullish Divergence")
+      if range_compressed:
+        reasons.append("15m Range Compression Breakout")
 
-            return {
-                "ticker": clean_sym_name,
-                "strategy_type": "INTRADAY_1",
-                "signal": "INTRADAY BUY (Strategy 1)",
-                "price": cmp,
-                "win_prob": win_prob,
-                "reasons": " | ".join(reasons),
-                "sl": sl,
-                "target_1": t1,
-                "target_2": t2,
-                "profit_pct": profit_pct,
-                "score": score,
-                "chart": chart_link
-            }
-    except Exception:
-        pass
-    return None
+      win_prob = round(min(base_prob, 97.5), 1)
+      sl = round(min(rolling_low, cmp * 0.992), 2)
+      risk = cmp - sl
+      if risk <= 0:
+        risk = cmp * 0.005
+        sl = cmp - risk
+      t1 = round(cmp + (risk * 1.5), 2)
+      t2 = round(cmp + (risk * 3.0), 2)
+      profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+      score = win_prob + profit_pct
+      clean_sym = ticker.replace(".NS", "")
+      news = get_latest_news(ticker)
 
-# --- INTRADAY STRATEGY 2 ---
-def scan_intraday_strategy_2(ticker):
-    """Evaluates stock for Intraday Strategy 2 (e.g. Opening Range / Momentum Breakout)."""
-    try:
-        stock = yf.Ticker(ticker)
-        df_intraday = stock.history(period="1d", interval="15m")
-        if df_intraday.empty or len(df_intraday) < 4:
-            return None
+      return {
+          "ticker": clean_sym,
+          "strategy_type": "COMBINED_INTRADAY",
+          "signal": "COMBINED INTRA BUY",
+          "price": cmp,
+          "win_prob": win_prob,
+          "reasons": " | ".join(reasons),
+          "sl": sl,
+          "target_1": t1,
+          "target_2": t2,
+          "profit_pct": profit_pct,
+          "score": score,
+          "news": news,
+          "chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+      }
+  except Exception:
+    pass
+  return None
 
-        if df_intraday.index.tz is not None:
-            df_intraday.index = df_intraday.index.tz_localize(None)
 
-        cmp = round(float(df_intraday.iloc[-1]["Close"]), 2)
-        if cmp < 50.0:
-            return None
+# --- INTRADAY STRATEGY 2: Volume Expansion Breakout ---
+def scan_volume_expansion(ticker):
+  try:
+    stock = yf.Ticker(ticker)
+    df_intraday = stock.history(period="3d", interval="15m")
+    if df_intraday.empty or len(df_intraday) < 60:
+      return None
+    if df_intraday.index.tz is not None:
+      df_intraday.index = df_intraday.index.tz_localize(None)
 
-        # Strategy logic criteria example for secondary intraday setup
-        morning_high = df_intraday["High"].iloc[:2].max()
-        current_vol = df_intraday["Volume"].iloc[-1]
-        avg_vol = df_intraday["Volume"].mean()
+    df_intraday["Vol_SMA_50"] = df_intraday["Volume"].rolling(window=50).mean()
+    recent_candles = df_intraday.iloc[:-1].tail(15)
+    resistance_high = float(recent_candles["High"].max())
 
-        if cmp > morning_high and current_vol > avg_vol * 1.3:
-            win_prob = 85.0
-            sl = round(cmp * 0.99, 2)
-            risk = cmp - sl
-            t1 = round(cmp + (risk * 1.5), 2)
-            t2 = round(cmp + (risk * 3.0), 2)
-            profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
-            score = win_prob + profit_pct
-            clean_sym_name = ticker.replace(".NS", "")
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
+    latest = df_intraday.iloc[-1]
+    cmp = round(float(latest["Close"]), 2)
+    latest_vol = float(latest["Volume"])
+    vol_sma_50 = float(df_intraday["Vol_SMA_50"].iloc[-1])
 
-            return {
-                "ticker": clean_sym_name,
-                "strategy_type": "INTRADAY_2",
-                "signal": "INTRADAY BUY (Strategy 2)",
-                "price": cmp,
-                "win_prob": win_prob,
-                "reasons": "Intraday Opening Range / Momentum Breakout",
-                "sl": sl,
-                "target_1": t1,
-                "target_2": t2,
-                "profit_pct": profit_pct,
-                "score": score,
-                "chart": chart_link
-            }
-    except Exception:
-        pass
-    return None
+    if cmp < 50.0 or pd.isna(vol_sma_50) or vol_sma_50 == 0:
+      return None
 
-# --- INTRADAY STRATEGY 3 (Instant Alert on Arrival) ---
-def scan_intraday_strategy_3(ticker):
-    """Evaluates stock for Intraday Strategy 3 (e.g. VWAP Reversal / Pullback Setup)."""
-    try:
-        stock = yf.Ticker(ticker)
-        df_intraday = stock.history(period="1d", interval="15m")
-        if df_intraday.empty or len(df_intraday) < 6:
-            return None
+    if latest_vol >= (vol_sma_50 * 2.5) and cmp >= resistance_high * 0.995:
+      win_prob = 89.0
+      reasons = [
+          "15m 50-VMA Volume Expansion Breakout",
+          f"Vol Surge: {round(latest_vol / vol_sma_50, 2)}x",
+      ]
+      sl = round(cmp * 0.992, 2)
+      risk = cmp - sl
+      t1 = round(cmp + (risk * 1.5), 2)
+      t2 = round(cmp + (risk * 3.0), 2)
+      profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+      score = win_prob + profit_pct
+      clean_sym = ticker.replace(".NS", "")
+      news = get_latest_news(ticker)
 
-        if df_intraday.index.tz is not None:
-            df_intraday.index = df_intraday.index.tz_localize(None)
+      return {
+          "ticker": clean_sym,
+          "strategy_type": "VOLUME_EXPANSION",
+          "signal": "VOL EXPANSION BREAKOUT BUY",
+          "price": cmp,
+          "win_prob": win_prob,
+          "reasons": " | ".join(reasons),
+          "sl": sl,
+          "target_1": t1,
+          "target_2": t2,
+          "profit_pct": profit_pct,
+          "score": score,
+          "news": news,
+          "chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+      }
+  except Exception:
+    pass
+  return None
 
-        cmp = round(float(df_intraday.iloc[-1]["Close"]), 2)
-        if cmp < 50.0:
-            return None
 
-        total_vol = df_intraday["Volume"].sum()
-        vwap = round(float((df_intraday["Close"] * df_intraday["Volume"]).sum() / total_vol), 2) if total_vol > 0 else cmp
+# --- INTRADAY STRATEGY 3: High-Turnover Momentum ---
+def scan_high_turnover_momentum(ticker):
+  try:
+    stock = yf.Ticker(ticker)
+    df_intraday = stock.history(period="2d", interval="15m")
+    if df_intraday.empty or len(df_intraday) < 5:
+      return None
+    if df_intraday.index.tz is not None:
+      df_intraday.index = df_intraday.index.tz_localize(None)
 
-        # Strategy 3 condition: Price bouncing off VWAP with momentum
-        prev_low = df_intraday["Low"].iloc[-2]
-        if prev_low <= vwap * 1.002 and cmp > vwap * 1.005:
-            win_prob = 87.0
-            sl = round(vwap * 0.99, 2)
-            risk = cmp - sl
-            if risk <= 0:
-                risk = cmp * 0.005
-                sl = cmp - risk
-            t1 = round(cmp + (risk * 1.5), 2)
-            t2 = round(cmp + (risk * 3.0), 2)
-            profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
-            score = win_prob + profit_pct
-            clean_sym_name = ticker.replace(".NS", "")
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
+    latest_date = df_intraday.index[-1].normalize()
+    df_today = df_intraday[df_intraday.index.normalize() == latest_date]
+    if df_today.empty:
+      df_today = df_intraday
 
-            return {
-                "ticker": clean_sym_name,
-                "strategy_type": "INTRADAY_3",
-                "signal": "INTRADAY BUY (Strategy 3)",
-                "price": cmp,
-                "win_prob": win_prob,
-                "reasons": "Intraday VWAP Pullback / Bounce Setup",
-                "sl": sl,
-                "target_1": t1,
-                "target_2": t2,
-                "profit_pct": profit_pct,
-                "score": score,
-                "chart": chart_link
-            }
-    except Exception:
-        pass
-    return None
+    total_volume = float(df_today["Volume"].sum())
+    cmp = round(float(df_today.iloc[-1]["Close"]), 2)
+    turnover_cr = round((total_volume * cmp) / 10000000, 2)
 
-def scan_weekly_stock(ticker):
-    """Scans an individual stock for GTF Multi-Timeframe Demand Zone & Structural Breakout Confluence."""
-    try:
-        stock = yf.Ticker(ticker)
-        df_weekly = stock.history(period="2y", interval="1wk")
-        df_monthly = stock.history(period="5y", interval="1mo")
-        df_daily = stock.history(period="6mo", interval="1d")
+    if cmp < 50.0 or turnover_cr < 100.0:
+      return None
 
-        if len(df_weekly) < 20 or len(df_monthly) < 6 or len(df_daily) < 30:
-            return None
+    prev_close = (
+        float(stock.fast_info.previous_close)
+        if stock.fast_info.previous_close
+        else cmp
+    )
+    pct_change = round(((cmp - prev_close) / prev_close) * 100, 2)
+    if pct_change < 0.5:
+      return None
 
-        cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
-        if cmp < 50.0:
-            return None
+    win_prob = 86.0
+    reasons = [
+        f"High Turnover Surge: ₹{turnover_cr} Cr",
+        f"Intraday Gain: {pct_change:+.2f}%",
+    ]
+    sl = round(cmp * 0.988, 2)
+    risk = cmp - sl
+    t1 = round(cmp + (risk * 1.5), 2)
+    t2 = round(cmp + (risk * 3.0), 2)
+    profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+    score = win_prob + profit_pct
+    clean_sym = ticker.replace(".NS", "")
+    news = get_latest_news(ticker)
 
-        monthly_demand_low = round(float(df_monthly["Low"].tail(12).min()), 2)
-        monthly_demand_high = round(float(df_monthly["Low"].tail(12).quantile(0.35)), 2)
-        hit_monthly_demand = (cmp >= monthly_demand_low * 0.97) and (cmp <= monthly_demand_high * 1.08)
+    return {
+        "ticker": clean_sym,
+        "strategy_type": "HIGH_TURNOVER",
+        "signal": "HIGH-TURNOVER MOMENTUM BUY",
+        "price": cmp,
+        "win_prob": win_prob,
+        "reasons": " | ".join(reasons),
+        "sl": sl,
+        "target_1": t1,
+        "target_2": t2,
+        "profit_pct": profit_pct,
+        "score": score,
+        "news": news,
+        "chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+    }
+  except Exception:
+    pass
+  return None
 
-        breakout_type = "GTF HTF Demand & Resistance Confluence"
-        if len(df_monthly) >= 12:
-            recent_max = df_monthly["High"].tail(12).max()
-            if cmp >= recent_max * 0.95:
-                breakout_type = "Multi-Month Breakout at HTF Demand"
 
-        daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
-        daily_trend_up = df_daily["Close"].iloc[-1] > df_daily["Close"].iloc[-20]
-        if not daily_trend_up or not (38 <= daily_rsi <= 72):
-            return None
+# --- WEEKLY STRATEGY SCANNERS (Executed at 8:30 AM IST) ---
+def scan_weekly_gtf(ticker):
+  try:
+    stock = yf.Ticker(ticker)
+    df_weekly = stock.history(period="2y", interval="1wk")
+    df_monthly = stock.history(period="5y", interval="1mo")
+    df_daily = stock.history(period="6mo", interval="1d")
 
-        sl = round(float(df_weekly["Low"].tail(3).min()) * 0.985, 2)
-        if sl >= cmp:
-            sl = round(cmp * 0.95, 2)
-        risk = cmp - sl
-        if risk <= 0:
-            return None
-        t1 = round(cmp + (risk * 1.5), 2)
-        t2 = round(cmp + (risk * 3.0), 2)
-        target_pct = round(((t2 - cmp) / cmp) * 100, 2)
+    if len(df_weekly) < 20 or len(df_monthly) < 6 or len(df_daily) < 30:
+      return None
 
-        win_prob = 86.5 if hit_monthly_demand else 84.0
-        score = win_prob + target_pct
-        clean_sym_name = ticker.replace(".NS", "")
-        chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
+    cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
+    if cmp < 50.0:
+      return None
 
-        return {
-            "ticker": clean_sym_name,
-            "signal": "WEEKLY / SWING BUY",
-            "close_price": cmp,
-            "setup_type": breakout_type,
-            "win_prob": win_prob,
-            "target_pct": target_pct,
-            "sl": sl,
-            "target_1": t1,
-            "target_2": t2,
-            "score": score,
-            "chart": chart_link
-        }
-    except Exception:
-        pass
-    return None
+    daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
+    daily_trend_up = df_daily["Close"].iloc[-1] > df_daily["Close"].iloc[-20]
+    if not daily_trend_up or not (38 <= daily_rsi <= 72):
+      return None
 
-def scan_weekly_coiling_stock(ticker):
-    """Scans for Weekly Coiling & Pre-Breakout Strategy setups."""
-    try:
-        stock = yf.Ticker(ticker)
-        df_weekly = stock.history(period="1y", interval="1wk")
-        df_daily = stock.history(period="3mo", interval="1d")
+    sl = round(float(df_weekly["Low"].tail(3).min()) * 0.985, 2)
+    if sl >= cmp:
+      sl = round(cmp * 0.95, 2)
+    risk = cmp - sl
+    if risk <= 0:
+      return None
 
-        if len(df_weekly) < 15 or len(df_daily) < 30:
-            return None
+    t1 = round(cmp + (risk * 1.5), 2)
+    t2 = round(cmp + (risk * 3.0), 2)
+    target_pct = round(((t2 - cmp) / cmp) * 100, 2)
+    win_prob = 86.5
+    score = win_prob + target_pct
+    clean_sym = ticker.replace(".NS", "")
+    news = get_latest_news(ticker)
 
-        cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
-        if cmp < 50.0:
-            return None
+    return {
+        "ticker": clean_sym,
+        "signal": "WEEKLY GTF BUY",
+        "close_price": cmp,
+        "setup_type": "GTF HTF Demand & Resistance Confluence",
+        "win_prob": win_prob,
+        "target_pct": target_pct,
+        "sl": sl,
+        "target_1": t1,
+        "target_2": t2,
+        "score": score,
+        "news": news,
+        "chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+    }
+  except Exception:
+    pass
+  return None
 
-        recent_highs = df_daily["High"].tail(10).max()
-        recent_lows = df_daily["Low"].tail(10).min()
-        range_pct = (recent_highs - recent_lows) / cmp
 
-        rsi_val = compute_rsi(df_daily["Close"], period=14).iloc[-1]
+def scan_weekly_coiling(ticker):
+  try:
+    stock = yf.Ticker(ticker)
+    df_daily = stock.history(period="3mo", interval="1d")
+    if len(df_daily) < 30:
+      return None
 
-        if range_pct > 0.08 or rsi_val < 45:
-            return None
+    cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
+    if cmp < 50.0:
+      return None
 
-        pattern = "5-Week Cup & Handle Base" if range_pct < 0.04 else "Volatility Contraction Range (VCP)"
-        setup_desc = f"Bollinger Squeeze + RSI {round(rsi_val, 1)} ({pattern})"
+    recent_highs = df_daily["High"].tail(10).max()
+    recent_lows = df_daily["Low"].tail(10).min()
+    range_pct = (recent_highs - recent_lows) / cmp
+    rsi_val = compute_rsi(df_daily["Close"], period=14).iloc[-1]
 
-        sl = round(float(df_daily["Low"].tail(5).min()) * 0.985, 2)
-        if sl >= cmp:
-            sl = round(cmp * 0.95, 2)
-        risk = cmp - sl
-        if risk <= 0:
-            risk = cmp * 0.02
-            sl = cmp - risk
+    if range_pct > 0.08 or rsi_val < 45:
+      return None
 
-        t1 = round(cmp * 1.12, 2)
-        t2 = round(cmp * 1.22, 2)
-        target_pct = 12.0
-        win_prob = 88.5
-        score = win_prob + target_pct
-        clean_sym_name = ticker.replace(".NS", "")
-        chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
+    setup_desc = (
+        "Volatility Contraction Range (VCP) & Bollinger Squeeze Setup"
+    )
+    sl = round(float(df_daily["Low"].tail(5).min()) * 0.985, 2)
+    if sl >= cmp:
+      sl = round(cmp * 0.95, 2)
+    risk = cmp - sl
+    if risk <= 0:
+      risk = cmp * 0.02
+      sl = cmp - risk
 
-        return {
-            "ticker": clean_sym_name,
-            "signal": "WEEKLY COILING BUY",
-            "close_price": cmp,
-            "setup_type": setup_desc,
-            "win_prob": win_prob,
-            "target_pct": target_pct,
-            "sl": sl,
-            "target_1": t1,
-            "target_2": t2,
-            "score": score,
-            "chart": chart_link
-        }
-    except Exception:
-        pass
-    return None
+    t1 = round(cmp * 1.12, 2)
+    t2 = round(cmp * 1.22, 2)
+    target_pct = 12.0
+    win_prob = 88.5
+    score = win_prob + target_pct
+    clean_sym = ticker.replace(".NS", "")
+    news = get_latest_news(ticker)
 
-def scan_momentum_swing_stock(ticker):
-    """Scans for Momentum & Trend Swing Strategy setups."""
-    try:
-        stock = yf.Ticker(ticker)
-        df_daily = stock.history(period="6mo", interval="1d")
-        if len(df_daily) < 50:
-            return None
-        cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
-        if cmp < 50.0:
-            return None
+    return {
+        "ticker": clean_sym,
+        "signal": "WEEKLY COILING BUY",
+        "close_price": cmp,
+        "setup_type": setup_desc,
+        "win_prob": win_prob,
+        "target_pct": target_pct,
+        "sl": sl,
+        "target_1": t1,
+        "target_2": t2,
+        "score": score,
+        "news": news,
+        "chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+    }
+  except Exception:
+    pass
+  return None
 
-        sma50 = df_daily["Close"].rolling(50).mean().iloc[-1]
-        rsi_val = compute_rsi(df_daily["Close"], period=14).iloc[-1]
 
-        if not (cmp >= sma50 and rsi_val >= 50.0):
-            return None
+def scan_3_ema_crossover(ticker):
+  try:
+    stock = yf.Ticker(ticker)
+    df_daily = stock.history(period="6mo", interval="1d")
+    if len(df_daily) < 60:
+      return None
 
-        clean_sym_name = ticker.replace(".NS", "")
-        chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
-        entry = cmp
-        sl = round(min(float(df_daily["Low"].tail(5).min()) * 0.99, entry * 0.95), 2)
-        risk = entry - sl
-        if risk <= 0:
-            return None
+    cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
+    if cmp < 50.0:
+      return None
 
-        t1 = round(entry + (risk * 1.5), 2)
-        t2 = round(entry + (risk * 2.8), 2)
-        target_pct = round(((t2 - entry) / entry) * 100, 2)
+    ema9 = df_daily["Close"].ewm(span=9, adjust=False).mean()
+    ema21 = df_daily["Close"].ewm(span=21, adjust=False).mean()
+    ema50 = df_daily["Close"].ewm(span=50, adjust=False).mean()
 
-        win_prob = round(min(62.0 + (rsi_val * 0.25), 94.5), 1)
-        score = win_prob + target_pct
+    curr_9, curr_21, curr_50 = ema9.iloc[-1], ema21.iloc[-1], ema50.iloc[-1]
+    prev_9, prev_21 = ema9.iloc[-2], ema21.iloc[-2]
 
-        return {
-            "ticker": clean_sym_name,
-            "signal": "MOMENTUM SWING BUY",
-            "close_price": cmp,
-            "setup_type": "Momentum & Trend Swing Setup (RSI >= 50, Price >= 50 SMA)",
-            "win_prob": win_prob,
-            "target_pct": target_pct,
-            "sl": sl,
-            "target_1": t1,
-            "target_2": t2,
-            "score": score,
-            "chart": chart_link
-        }
-    except Exception:
-        pass
-    return None
+    is_aligned_up = (curr_9 > curr_21) and (curr_21 > curr_50)
+    recent_crossover = (prev_9 <= prev_21) and (curr_9 > curr_21)
 
-def scan_3_ema_crossover_stock(ticker):
-    """Scans for High-Running 3 EMA Crossover Strategy setups (9, 21, 50)."""
-    try:
-        stock = yf.Ticker(ticker)
-        df_daily = stock.history(period="6mo", interval="1d")
-        if len(df_daily) < 60:
-            return None
+    if not (is_aligned_up or recent_crossover):
+      return None
 
-        cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
-        if cmp < 50.0:
-            return None
+    clean_sym = ticker.replace(".NS", "")
+    sl = round(float(ema21.iloc[-1]) * 0.99, 2)
+    if sl >= cmp:
+      sl = round(cmp * 0.96, 2)
+    risk = cmp - sl
+    if risk <= 0:
+      return None
 
-        ema9 = df_daily["Close"].ewm(span=9, adjust=False).mean()
-        ema21 = df_daily["Close"].ewm(span=21, adjust=False).mean()
-        ema50 = df_daily["Close"].ewm(span=50, adjust=False).mean()
+    t1 = round(cmp + (risk * 1.5), 2)
+    t2 = round(cmp + (risk * 3.0), 2)
+    target_pct = round(((t2 - cmp) / cmp) * 100, 2)
+    win_prob = 89.0 if recent_crossover else 86.5
+    score = win_prob + target_pct
+    news = get_latest_news(ticker)
 
-        curr_9 = ema9.iloc[-1]
-        curr_21 = ema21.iloc[-1]
-        curr_50 = ema50.iloc[-1]
-        prev_9 = ema9.iloc[-2]
-        prev_21 = ema21.iloc[-2]
+    return {
+        "ticker": clean_sym,
+        "signal": "3 EMA CROSSOVER BUY",
+        "close_price": cmp,
+        "setup_type": "Bullish 9/21/50 EMA Alignment & Crossover",
+        "win_prob": win_prob,
+        "target_pct": target_pct,
+        "sl": sl,
+        "target_1": t1,
+        "target_2": t2,
+        "score": score,
+        "news": news,
+        "chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+    }
+  except Exception:
+    pass
+  return None
 
-        is_aligned_up = (curr_9 > curr_21) and (curr_21 > curr_50)
-        recent_crossover = (prev_9 <= prev_21) and (curr_9 > curr_21)
-
-        if not (is_aligned_up or recent_crossover):
-            return None
-
-        clean_sym_name = ticker.replace(".NS", "")
-        chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym_name}"
-        entry = cmp
-        sl = round(float(ema21.iloc[-1]) * 0.99, 2)
-        if sl >= entry:
-            sl = round(entry * 0.96, 2)
-
-        risk = entry - sl
-        if risk <= 0:
-            return None
-
-        t1 = round(entry + (risk * 1.5), 2)
-        t2 = round(entry + (risk * 3.0), 2)
-        target_pct = round(((t2 - entry) / entry) * 100, 2)
-
-        win_prob = 89.0 if recent_crossover else 86.5
-        score = win_prob + target_pct
-
-        return {
-            "ticker": clean_sym_name,
-            "signal": "3 EMA CROSSOVER BUY",
-            "close_price": cmp,
-            "setup_type": "Bullish 9/21/50 EMA Alignment & Crossover",
-            "win_prob": win_prob,
-            "target_pct": target_pct,
-            "sl": sl,
-            "target_1": t1,
-            "target_2": t2,
-            "score": score,
-            "chart": chart_link
-        }
-    except Exception:
-        pass
-    return None
 
 def main():
-    print("Initializing Master Confluence Telegram Scanner for Comprehensive Stock Universe...")
-    stocks = get_comprehensive_stock_pool()
-    print(f"Loaded {len(stocks)} stocks into scanning pool.")
+  print(
+      "Initializing Master Confluence Telegram Scanner Aligned with Terminal"
+      " Universe..."
+  )
+  stocks = get_comprehensive_stock_pool()
+  print(f"Loaded {len(stocks)} stocks into scanning pool.")
 
-    # IST Conversion: 8:30 AM IST corresponds to 03:00 UTC
-    now_utc = datetime.now(timezone.utc)
-    current_hour_utc = now_utc.hour
-    is_weekly_schedule = (current_hour_utc == 3 or current_hour_utc == 4) # 8:30 AM IST execution window
+  # 8:30 AM IST corresponds to 03:00 UTC
+  now_utc = datetime.now(timezone.utc)
+  current_hour_utc = now_utc.hour
+  is_weekly_schedule = current_hour_utc == 3
 
-    if is_weekly_schedule:
-        print("Running All Weekly & Swing Strategy Scans...")
-        gtf_matches = []
-        momentum_matches = []
-        ema_matches = []
-        coiling_matches = []
+  if is_weekly_schedule:
+    print(
+        "Running Weekly & Swing Strategy Scans at 8:30 AM IST Schedule Window..."
+    )
+    gtf_matches, coiling_matches, ema_matches = [], [], []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
-            gtf_results = executor.map(scan_weekly_stock, stocks)
-            for r in gtf_results:
-                if r:
-                    gtf_matches.append(r)
-            
-            momentum_results = executor.map(scan_momentum_swing_stock, stocks)
-            for r in momentum_results:
-                if r:
-                    momentum_matches.append(r)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
+      for r in executor.map(scan_weekly_gtf, stocks):
+        if r:
+          gtf_matches.append(r)
+      for r in executor.map(scan_weekly_coiling, stocks):
+        if r:
+          coiling_matches.append(r)
+      for r in executor.map(scan_3_ema_crossover, stocks):
+        if r:
+          ema_matches.append(r)
 
-            ema_results = executor.map(scan_3_ema_crossover_stock, stocks)
-            for r in ema_results:
-                if r:
-                    ema_matches.append(r)
+    # Top 3 stocks limit for each weekly strategy
+    gtf_matches = sorted(gtf_matches, key=lambda x: x["score"], reverse=True)[:3]
+    coiling_matches = sorted(
+        coiling_matches, key=lambda x: x["score"], reverse=True
+    )[:3]
+    ema_matches = sorted(ema_matches, key=lambda x: x["score"], reverse=True)[:3]
 
-            coiling_results = executor.map(scan_weekly_coiling_stock, stocks)
-            for r in coiling_results:
-                if r:
-                    coiling_matches.append(r)
+    if gtf_matches:
+      msg = "🚀 *GTF WEEKLY DEMAND & SWING (TOP 3)* 🚀\n\n"
+      for m in gtf_matches:
+        news_line = (
+            f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
+        )
+        msg += (
+            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+            f"• *Reason for Buy:* {m['setup_type']}\n"
+            f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
+            f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
+            f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+            f"• *Target 2:* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
+            f"{news_line}"
+            f"• [Open TradingView Chart]({m['chart']})\n\n"
+        )
+      send_telegram_message(msg)
 
-        gtf_matches = sorted(gtf_matches, key=lambda x: x['score'], reverse=True)[:5]
-        momentum_matches = sorted(momentum_matches, key=lambda x: x['score'], reverse=True)[:5]
-        ema_matches = sorted(ema_matches, key=lambda x: x['score'], reverse=True)[:5]
-        coiling_matches = sorted(coiling_matches, key=lambda x: x['score'], reverse=True)[:5]
+    if coiling_matches:
+      msg = "🌀 *WEEKLY COILING & VCP SETUPS (TOP 3)* 🌀\n\n"
+      for m in coiling_matches:
+        news_line = (
+            f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
+        )
+        msg += (
+            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+            f"• *Reason for Buy:* {m['setup_type']}\n"
+            f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
+            f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
+            f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+            f"• *Target 2:* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
+            f"{news_line}"
+            f"• [Open TradingView Chart]({m['chart']})\n\n"
+        )
+      send_telegram_message(msg)
 
-        if gtf_matches:
-            msg = "🚀 *GTF WEEKLY & SWING CONFLUENCE (TOP 5)* 🚀\n\n"
-            for m in gtf_matches:
-                msg += (
-                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"• *Reason for Buy:* {m['setup_type']}\n"
-                    f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
-                    f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
-                    f"• *Target 1 (1-2W):* ₹{m['target_1']:.2f}\n"
-                    f"• *Target 2 (3-4W):* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
-                    f"• [Open TradingView Chart]({m['chart']})\n\n"
-                )
-            send_telegram_message(msg)
+    if ema_matches:
+      msg = "⚡ *3 EMA CROSSOVER SWING SETUPS (TOP 3)* ⚡\n\n"
+      for m in ema_matches:
+        news_line = (
+            f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
+        )
+        msg += (
+            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+            f"• *Reason for Buy:* {m['setup_type']}\n"
+            f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
+            f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
+            f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+            f"• *Target 2:* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
+            f"{news_line}"
+            f"• [Open TradingView Chart]({m['chart']})\n\n"
+        )
+      send_telegram_message(msg)
 
-        if coiling_matches:
-            msg = "🌀 *WEEKLY COILING & PRE-BREAKOUT SETUPS (TOP 5)* 🌀\n\n"
-            for m in coiling_matches:
-                msg += (
-                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"• *Reason for Buy:* {m['setup_type']}\n"
-                    f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
-                    f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
-                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
-                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
-                    f"• [Open TradingView Chart]({m['chart']})\n\n"
-                )
-            send_telegram_message(msg)
+  else:
+    print(
+        "Running Intraday Strategy Scans (Combined Confluence, Volume"
+        " Expansion, High-Turnover)..."
+    )
+    sent_state = load_sent_state()
+    today_str = datetime.now().strftime("%Y-%m-%d")
 
-        if momentum_matches:
-            msg = "📈 *MOMENTUM & TREND SWING SETUPS (TOP 5)* 📈\n\n"
-            for m in momentum_matches:
-                msg += (
-                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"• *Reason for Buy:* {m['setup_type']}\n"
-                    f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
-                    f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
-                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
-                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
-                    f"• [Open TradingView Chart]({m['chart']})\n\n"
-                )
-            send_telegram_message(msg)
+    strat1_matches, strat2_matches, strat3_matches = [], [], []
 
-        if ema_matches:
-            msg = "⚡ *3 EMA CROSSOVER SWING SETUPS (TOP 5)* ⚡\n\n"
-            for m in ema_matches:
-                msg += (
-                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"• *Reason for Buy:* {m['setup_type']}\n"
-                    f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
-                    f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
-                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
-                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
-                    f"• [Open TradingView Chart]({m['chart']})\n\n"
-                )
-            send_telegram_message(msg)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
+      for r in executor.map(scan_combined_intraday, stocks):
+        if r:
+          key = f"{r['ticker']}_{r['strategy_type']}"
+          if sent_state.get(key) != today_str:
+            strat1_matches.append(r)
 
-        if not (gtf_matches or momentum_matches or ema_matches or coiling_matches):
-            print("No weekly/swing setup matches found across the universe.")
+      for r in executor.map(scan_volume_expansion, stocks):
+        if r:
+          key = f"{r['ticker']}_{r['strategy_type']}"
+          if sent_state.get(key) != today_str:
+            strat2_matches.append(r)
 
-    else:
-        print("Running All Intraday Strategy Scans (Strategy 1, Strategy 2, & Strategy 3)...")
-        sent_state = load_sent_state()
-        today_str = datetime.now().strftime("%Y-%m-%d")
+      for r in executor.map(scan_high_turnover_momentum, stocks):
+        if r:
+          key = f"{r['ticker']}_{r['strategy_type']}"
+          if sent_state.get(key) != today_str:
+            strat3_matches.append(r)
 
-        strat1_matches = []
-        strat2_matches = []
-        strat3_matches = []
+    # Strictly Top 3 stocks for each intraday strategy
+    strat1_matches = sorted(
+        strat1_matches, key=lambda x: x["score"], reverse=True
+    )[:3]
+    strat2_matches = sorted(
+        strat2_matches, key=lambda x: x["score"], reverse=True
+    )[:3]
+    strat3_matches = sorted(
+        strat3_matches, key=lambda x: x["score"], reverse=True
+    )[:3]
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
-            # Scan Strategy 1
-            results_1 = executor.map(scan_intraday_stock, stocks)
-            for r in results_1:
-                if r:
-                    # Prevent duplicates for strategy 1 today
-                    key = f"{r['ticker']}_{r['strategy_type']}"
-                    if sent_state.get(key) == today_str:
-                        continue
-                    strat1_matches.append(r)
+    if strat1_matches:
+      msg = "⚡ *TOP 3 COMBINED INTRADAY CONFLUENCE ALERTS* ⚡\n\n"
+      for m in strat1_matches:
+        news_line = (
+            f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
+        )
+        msg += (
+            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+            f"• *Reason for Buy:* {m['reasons']}\n"
+            f"• *Tight Entry:* ₹{m['price']:.2f}\n"
+            f"• *Small SL:* ₹{m['sl']:.2f}\n"
+            f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+            f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
+            f"{news_line}"
+            f"• [Open TradingView Chart]({m['chart']})\n\n"
+        )
+      send_telegram_message(msg)
+      for m in strat1_matches:
+        sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
 
-            # Scan Strategy 2
-            results_2 = executor.map(scan_intraday_strategy_2, stocks)
-            for r in results_2:
-                if r:
-                    key = f"{r['ticker']}_{r['strategy_type']}"
-                    if sent_state.get(key) == today_str:
-                        continue
-                    strat2_matches.append(r)
+    if strat2_matches:
+      msg = "🚀 *TOP 3 VOLUME EXPANSION BREAKOUT ALERTS* 🚀\n\n"
+      for m in strat2_matches:
+        news_line = (
+            f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
+        )
+        msg += (
+            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+            f"• *Reason for Buy:* {m['reasons']}\n"
+            f"• *Tight Entry:* ₹{m['price']:.2f}\n"
+            f"• *Small SL:* ₹{m['sl']:.2f}\n"
+            f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+            f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
+            f"{news_line}"
+            f"• [Open TradingView Chart]({m['chart']})\n\n"
+        )
+      send_telegram_message(msg)
+      for m in strat2_matches:
+        sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
 
-            # Scan Strategy 3 (Instant alert on arrival)
-            results_3 = executor.map(scan_intraday_strategy_3, stocks)
-            for r in results_3:
-                if r:
-                    key = f"{r['ticker']}_{r['strategy_type']}"
-                    if sent_state.get(key) == today_str:
-                        continue
-                    strat3_matches.append(r)
+    if strat3_matches:
+      msg = "🔥 *TOP 3 HIGH-TURNOVER MOMENTUM ALERTS* 🔥\n\n"
+      for m in strat3_matches:
+        news_line = (
+            f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
+        )
+        msg += (
+            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+            f"• *Reason for Buy:* {m['reasons']}\n"
+            f"• *Tight Entry:* ₹{m['price']:.2f}\n"
+            f"• *Small SL:* ₹{m['sl']:.2f}\n"
+            f"• *Target 1:* ₹{m['target_1']:.2f}\n"
+            f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
+            f"{news_line}"
+            f"• [Open TradingView Chart]({m['chart']})\n\n"
+        )
+      send_telegram_message(msg)
+      for m in strat3_matches:
+        sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
 
-        # Sort and limit Strategy 1 & 2 to top 3 best stocks
-        strat1_matches = sorted(strat1_matches, key=lambda x: x['score'], reverse=True)[:3]
-        strat2_matches = sorted(strat2_matches, key=lambda x: x['score'], reverse=True)[:3]
-        # Strategy 3 sends instantly for all qualified incoming stocks up to top 3 as well
-        strat3_matches = sorted(strat3_matches, key=lambda x: x['score'], reverse=True)[:3]
+    save_sent_state(sent_state)
 
-        # Send Alerts for Intraday Strategy 1
-        if strat1_matches:
-            msg = "⚡ *TOP 3 INTRADAY CONFLUENCE ALERTS (STRATEGY 1)* ⚡\n\n"
-            for m in strat1_matches:
-                msg += (
-                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"• *Reason for Buy:* {m['reasons']}\n"
-                    f"• *Tight Entry:* ₹{m['price']:.2f}\n"
-                    f"• *Small SL:* ₹{m['sl']:.2f}\n"
-                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
-                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
-                    f"• [Open TradingView Chart]({m['chart']})\n\n"
-                )
-            send_telegram_message(msg)
-            for m in strat1_matches:
-                sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
-
-        # Send Alerts for Intraday Strategy 2
-        if strat2_matches:
-            msg = "⚡ *TOP 3 INTRADAY MOMENTUM ALERTS (STRATEGY 2)* ⚡\n\n"
-            for m in strat2_matches:
-                msg += (
-                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"• *Reason for Buy:* {m['reasons']}\n"
-                    f"• *Tight Entry:* ₹{m['price']:.2f}\n"
-                    f"• *Small SL:* ₹{m['sl']:.2f}\n"
-                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
-                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
-                    f"• [Open TradingView Chart]({m['chart']})\n\n"
-                )
-            send_telegram_message(msg)
-            for m in strat2_matches:
-                sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
-
-        # Send Alerts for Intraday Strategy 3 (Instant Arrival)
-        if strat3_matches:
-            msg = "⚡ *INSTANT INTRADAY VWAP PULLBACK ALERTS (STRATEGY 3)* ⚡\n\n"
-            for m in strat3_matches:
-                msg += (
-                    f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-                    f"• *Reason for Buy:* {m['reasons']}\n"
-                    f"• *Tight Entry:* ₹{m['price']:.2f}\n"
-                    f"• *Small SL:* ₹{m['sl']:.2f}\n"
-                    f"• *Target 1:* ₹{m['target_1']:.2f}\n"
-                    f"• *Target 2:* ₹{m['target_2']:.2f} ({m['profit_pct']:+.2f}%)\n"
-                    f"• [Open TradingView Chart]({m['chart']})\n\n"
-                )
-            send_telegram_message(msg)
-            for m in strat3_matches:
-                sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
-
-        save_sent_state(sent_state)
-
-        if not (strat1_matches or strat2_matches or strat3_matches):
-            print("No intraday setup matches found across the universe in this cycle.")
 
 if __name__ == "__main__":
-    main()
+  main()
