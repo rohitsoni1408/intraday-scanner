@@ -590,16 +590,20 @@ def process_volume_expansion_breakout_strategy(stock_data, top_n_count, universe
     return df_res
 
 
-# --- HIGH-TURNOVER & SMALL-CAP / IPO MOMENTUM STRATEGY (UNRESTRICTED CASH MARKET POOL) ---
+# --- HIGH-TURNOVER & SMALL-CAP / IPO MOMENTUM STRATEGY (WITH POST-MARKET FALLBACK) ---
 @st.cache_data(ttl=15)
-def process_high_turnover_momentum_strategy(stock_data, top_n_count):
+def process_high_turnover_momentum_strategy(stock_data, top_n_count, universe_pool):
     buy_list = []
     extracted_symbols = [
         item.get("nsecode", item.get("symbol", "")).strip()
         for item in stock_data
         if item.get("nsecode", item.get("symbol", ""))
     ]
-    # Removed Nifty market-cap pool restriction so small-caps, IPOs, and heavy-volume runners are fully scanned directly from Chartink output
+    
+    # Fallback to general universe pool if Chartink returns nothing (e.g., market is closed)
+    if not extracted_symbols:
+        extracted_symbols = universe_pool[:200]
+
     active_symbols = list(dict.fromkeys(extracted_symbols))
 
     for sym in active_symbols:
@@ -907,10 +911,10 @@ with main_tab1:
 
     else: # High Turnover & Small-Cap / IPO Momentum Surge Strategy
         if st.button("🔥 Run High-Turnover Momentum Scan", type="primary", use_container_width=True):
-            with st.spinner("Scanning full cash market for absolute turnover >= ₹100 Cr (catching IPOs & heavy volume runners)..."):
+            with st.spinner("Scanning market for absolute turnover >= ₹100 Cr (catching IPOs & heavy volume runners)..."):
                 raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
                 df_high_turn = process_high_turnover_momentum_strategy(
-                    raw_stocks, selected_count
+                    raw_stocks, selected_count, active_universe_pool
                 )
                 st.session_state["strategy_scans"]["High Turnover Momentum Strategy"] = df_high_turn
                 st.success("High-turnover momentum scan completed successfully!")
@@ -981,8 +985,8 @@ with main_tab3:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
     - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
-    - **High-Turnover Engine:** Unrestricted by Nifty market-cap caps, it scans the entire cash market for stocks pulling ₹100 Cr+ in absolute turnover on day one, catching IPOs and heavy-volume runners cleanly.
-    - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the Nifty universe.
+    - **High-Turnover Engine:** Scans for stocks pulling ₹100 Cr+ in absolute turnover. Includes a post-market fallback so you can test and analyze results even when the market is closed.
+    - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
     """)
 
 st.markdown("---")
