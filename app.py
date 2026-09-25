@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 # Page Configuration
 st.set_page_config(
-    page_title="Ultimate Multi-Timeframe Confluence Terminal", layout="wide"
+    page_title="Ultimate Multi-Timeframe Confluence Terminal - Intraday Edition", layout="wide"
 )
 
 # --- CUSTOM UI STYLING (Strictly NO white color) ---
@@ -61,9 +61,9 @@ def is_market_closed():
 
 
 # --- MAIN APP ---
-st.title("👑 NSE Ultimate Master Confluence Engine (Nifty Universe)")
+st.title("👑 NSE Ultimate Intraday Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **GTF Multi-Timeframe Analysis**, **Rolling Institutional Breakouts**, **Optimized Weekly Strategies**, and **High-Turnover Momentum Scans**."
+    "Trading Terminal featuring **GTF Intraday Analysis**, **Rolling Institutional Breakouts**, **High-Turnover Momentum Scans**, and **Intraday Session Backtesting**."
 )
 
 market_status = (
@@ -97,10 +97,10 @@ with config_col2:
     )
 st.markdown("---")
 
-# --- CONSOLIDATED 3-TAB LAYOUT ---
+# --- CONSOLIDATED 3-TAB LAYOUT (INTRADAY ONLY) ---
 main_tab1, main_tab2, main_tab3 = st.tabs([
-    "📈 Live Strategies Hub",
-    "📊 Backtesters Hub",
+    "📈 Intraday Strategies Hub",
+    "📊 Intraday Backtester Hub",
     "📌 Terminal Info & Guide"
 ])
 
@@ -159,7 +159,7 @@ def compute_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 
-# --- WEEKLY / DAILY STRATEGY PRE-FILTER FOR INTRADAY TRADES ---
+# --- DAILY TREND PRE-FILTER FOR INTRADAY TRADES ---
 @st.cache_data(ttl=300)
 def check_weekly_daily_confluence_filter(symbols):
     qualified_symbols = []
@@ -386,7 +386,7 @@ def process_combined_intraday_strategy(
         is_bearish_setup = (cmp < rolling_low or (range_compressed and cmp <= vwap)) and (cmp <= vwap * 1.005)
 
         base_prob = 84.5
-        reasons = ["Weekly/Daily Trend + Intraday Confluence"]
+        reasons = ["Daily Trend + Intraday Confluence"]
 
         if exceptional_vol or vol_spike:
             base_prob += 6.5
@@ -590,20 +590,15 @@ def process_volume_expansion_breakout_strategy(stock_data, top_n_count, universe
     return df_res
 
 
-# --- NEWLY ADDED: HIGH-TURNOVER & SMALL-CAP / IPO MOMENTUM STRATEGY ---
+# --- HIGH-TURNOVER & SMALL-CAP / IPO MOMENTUM STRATEGY ---
 @st.cache_data(ttl=15)
 def process_high_turnover_momentum_strategy(stock_data, top_n_count, universe_pool):
-    """
-    Dedicated Strategy for high single-day absolute turnover (>= ₹100 Cr to ₹200 Cr)
-    in mid/small caps and recent IPO listings, bypassing strict 50-period moving average history gaps.
-    """
     buy_list = []
     extracted_symbols = [
         item.get("nsecode", item.get("symbol", "")).strip()
         for item in stock_data
         if item.get("nsecode", item.get("symbol", ""))
     ]
-    # Also evaluate top universe stocks
     active_symbols = list(dict.fromkeys(extracted_symbols + universe_pool[:250]))
 
     for sym in active_symbols:
@@ -627,14 +622,12 @@ def process_high_turnover_momentum_strategy(stock_data, top_n_count, universe_po
             cmp = round(float(df_today.iloc[-1]["Close"]), 2)
             turnover_cr = round((total_volume * cmp) / 10000000, 2)
 
-            # Absolute Turnover Threshold >= ₹100 Crore (captures heavy volume runners & new IPOs)
             if turnover_cr < 100.0:
                 continue
 
             prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else cmp
             pct_change = round(((cmp - prev_close) / prev_close) * 100, 2)
 
-            # Must be positive momentum day
             if pct_change < 0.5:
                 continue
 
@@ -683,382 +676,6 @@ def process_high_turnover_momentum_strategy(stock_data, top_n_count, universe_po
     df_res = pd.DataFrame(buy_list)
     if not df_res.empty:
         df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
-    return df_res
-
-
-# --- OPTIMIZED WEEKLY / SWING STRATEGIES ---
-
-@st.cache_data(ttl=300)
-def fetch_gtf_breakout_confluence_strategy(symbols, top_n_count):
-    results = []
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_weekly = ticker.history(period="2y", interval="1wk")
-            df_monthly = ticker.history(period="5y", interval="1mo")
-            df_daily = ticker.history(period="6mo", interval="1d")
-
-            if len(df_weekly) < 20 or len(df_monthly) < 6 or len(df_daily) < 30:
-                continue
-
-            cmp = round(float(df_weekly.iloc[-1]["Close"]), 2)
-            if cmp < 50.0:
-                continue
-
-            monthly_demand_low = round(float(df_monthly["Low"].tail(12).min()), 2)
-            monthly_demand_high = round(float(df_monthly["Low"].tail(12).quantile(0.35)), 2)
-            hit_monthly_demand = (cmp >= monthly_demand_low * 0.97) and (cmp <= monthly_demand_high * 1.08)
-
-            breakout_type = "GTF HTF Demand & Resistance Confluence"
-            if len(df_monthly) >= 12:
-                recent_max = df_monthly["High"].tail(12).max()
-                if cmp >= recent_max * 0.95:
-                    breakout_type = "Multi-Month Breakout at HTF Demand"
-
-            daily_rsi = compute_rsi(df_daily["Close"], period=14).iloc[-1]
-            daily_trend_up = df_daily["Close"].iloc[-1] > df_daily["Close"].iloc[-20]
-            if not daily_trend_up or not (38 <= daily_rsi <= 72):
-                continue
-
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-            entry = cmp
-            sl = round(float(df_weekly["Low"].tail(3).min()) * 0.985, 2)
-            if sl >= entry:
-                sl = round(entry * 0.95, 2)
-
-            risk = entry - sl
-            if risk <= 0:
-                continue
-
-            t1 = round(entry + (risk * 1.5), 2)
-            t2 = round(entry + (risk * 3.0), 2)
-            target_pct = round(((t2 - entry) / entry) * 100, 2)
-
-            win_prob = 86.5 if hit_monthly_demand else 84.0
-            raw_score = win_prob + target_pct
-
-            results.append({
-                "Symbol": clean_sym,
-                "Signal": "GTF & BREAKOUT CONFLUENCE BUY",
-                "Win Probability (%)": f"{win_prob}%",
-                "Setup Type": breakout_type,
-                "Weekly Close (₹)": f"₹{cmp}",
-                "Supply/Target Zone (₹)": f"₹{round(cmp * 1.15, 2)}",
-                "1-4W Profit Potential (%)": f"{target_pct:+.2f}%",
-                "Tight Entry (₹)": f"₹{entry}",
-                "Small SL (₹)": f"₹{sl}",
-                "Target 1 (1-2W) (₹)": f"₹{t1}",
-                "Target 2 (3-4W) (₹)": f"₹{t2}",
-                "RawVolume": df_weekly["Volume"].iloc[-1],
-                "RawWinProb": win_prob,
-                "RawScore": raw_score,
-                "RawProfitPct": target_pct,
-                "Chart": chart_link,
-            })
-        except Exception:
-            continue
-
-    df_res = pd.DataFrame(results)
-    if not df_res.empty:
-        df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
-    return df_res
-
-
-@st.cache_data(ttl=300)
-def fetch_momentum_swing_strategy(symbols, top_n_count):
-    results = []
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_daily = ticker.history(period="6mo", interval="1d")
-            if len(df_daily) < 50:
-                continue
-            cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
-            if cmp < 50.0:
-                continue
-
-            sma20 = df_daily["Close"].rolling(20).mean().iloc[-1]
-            sma50 = df_daily["Close"].rolling(50).mean().iloc[-1]
-            rsi_val = compute_rsi(df_daily["Close"], period=14).iloc[-1]
-
-            if not (cmp >= sma50 and rsi_val >= 50.0):
-                continue
-
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-            entry = cmp
-            sl = round(min(float(df_daily["Low"].tail(5).min()) * 0.99, entry * 0.95), 2)
-            risk = entry - sl
-            if risk <= 0:
-                continue
-
-            t1 = round(entry + (risk * 1.5), 2)
-            t2 = round(entry + (risk * 2.8), 2)
-            target_pct = round(((t2 - entry) / entry) * 100, 2)
-
-            win_prob = round(min(62.0 + (rsi_val * 0.25), 94.5), 1)
-            raw_score = win_prob + target_pct
-
-            results.append({
-                "Symbol": clean_sym,
-                "Signal": "MOMENTUM SWING BUY",
-                "Win Probability (%)": f"{win_prob}%",
-                "Daily Close (₹)": f"₹{cmp}",
-                "RSI (14)": round(rsi_val, 2),
-                "Target Potential (%)": f"{target_pct:+.2f}%",
-                "Tight Entry (₹)": f"₹{entry}",
-                "Small SL (₹)": f"₹{sl}",
-                "Target 1 (₹)": f"₹{t1}",
-                "Target 2 (₹)": f"₹{t2}",
-                "RawVolume": df_daily["Volume"].iloc[-1],
-                "RawWinProb": win_prob,
-                "RawScore": raw_score,
-                "RawProfitPct": target_pct,
-                "Chart": chart_link,
-            })
-        except Exception:
-            continue
-
-    df_res = pd.DataFrame(results)
-    if not df_res.empty:
-        df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
-    return df_res
-
-
-@st.cache_data(ttl=300)
-def fetch_3_ema_crossover_strategy(symbols, top_n_count):
-    results = []
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_daily = ticker.history(period="6mo", interval="1d")
-            if len(df_daily) < 60:
-                continue
-
-            cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
-            if cmp < 50.0:
-                continue
-
-            ema9 = df_daily["Close"].ewm(span=9, adjust=False).mean()
-            ema21 = df_daily["Close"].ewm(span=21, adjust=False).mean()
-            ema50 = df_daily["Close"].ewm(span=50, adjust=False).mean()
-
-            curr_9 = ema9.iloc[-1]
-            curr_21 = ema21.iloc[-1]
-            curr_50 = ema50.iloc[-1]
-            prev_9 = ema9.iloc[-2]
-            prev_21 = ema21.iloc[-2]
-
-            is_aligned_up = (curr_9 > curr_21) and (curr_21 > curr_50)
-            recent_crossover = (prev_9 <= prev_21) and (curr_9 > curr_21)
-
-            if not (is_aligned_up or recent_crossover):
-                continue
-
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-            entry = cmp
-            sl = round(float(ema21.iloc[-1]) * 0.99, 2)
-            if sl >= entry:
-                sl = round(entry * 0.96, 2)
-
-            risk = entry - sl
-            if risk <= 0:
-                continue
-
-            t1 = round(entry + (risk * 1.5), 2)
-            t2 = round(entry + (risk * 3.0), 2)
-            target_pct = round(((t2 - entry) / entry) * 100, 2)
-
-            win_prob = 89.0 if recent_crossover else 86.5
-            raw_score = win_prob + target_pct
-
-            results.append({
-                "Symbol": clean_sym,
-                "Signal": "3 EMA CROSSOVER BUY",
-                "Win Probability (%)": f"{win_prob}%",
-                "Condition": "Bullish 9/21/50 EMA Alignment & Crossover",
-                "Daily Close (₹)": f"₹{cmp}",
-                "9 EMA (₹)": f"₹{round(curr_9, 2)}",
-                "21 EMA (₹)": f"₹{round(curr_21, 2)}",
-                "Target Potential (%)": f"{target_pct:+.2f}%",
-                "Tight Entry (₹)": f"₹{entry}",
-                "Small SL (₹)": f"₹{sl}",
-                "Target 1 (₹)": f"₹{t1}",
-                "Target 2 (₹)": f"₹{t2}",
-                "RawVolume": df_daily["Volume"].iloc[-1],
-                "RawWinProb": win_prob,
-                "RawScore": raw_score,
-                "RawProfitPct": target_pct,
-                "Chart": chart_link,
-            })
-        except Exception:
-            continue
-
-    df_res = pd.DataFrame(results)
-    if not df_res.empty:
-        df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
-    return df_res
-
-
-@st.cache_data(ttl=300)
-def fetch_weekly_trade_coiling_strategy(symbols, top_n_count):
-    results = []
-    for sym in symbols:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_weekly = ticker.history(period="1y", interval="1wk")
-            df_daily = ticker.history(period="3mo", interval="1d")
-
-            if len(df_weekly) < 15 or len(df_daily) < 30:
-                continue
-
-            cmp = round(float(df_daily.iloc[-1]["Close"]), 2)
-            if cmp < 50.0:
-                continue
-
-            recent_highs = df_daily["High"].tail(10).max()
-            recent_lows = df_daily["Low"].tail(10).min()
-            range_pct = (recent_highs - recent_lows) / cmp
-
-            rsi_val = compute_rsi(df_daily["Close"], period=14).iloc[-1]
-
-            if range_pct > 0.08 or rsi_val < 45:
-                continue
-
-            cap_tier = "Large-Cap" if symbols.index(sym) < 40 else ("Mid-Cap" if symbols.index(sym) < 120 else "Small-Cap")
-
-            pattern = "5-Week Cup & Handle Base" if range_pct < 0.04 else "Volatility Contraction Range (VCP)"
-            setup_desc = f"Bollinger Squeeze + RSI {round(rsi_val, 1)}"
-            entry_zone = f"₹{round(cmp * 0.99, 2)} - ₹{round(cmp * 1.01, 2)}"
-            sl = round(float(df_daily["Low"].tail(5).min()) * 0.985, 2)
-            target_outlook = f"₹{round(cmp * 1.12, 2)} / ₹{round(cmp * 1.22, 2)}"
-            target_pct = 12.0
-            win_prob = 88.5
-            raw_score = win_prob + target_pct
-
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-
-            results.append({
-                "Symbol": clean_sym,
-                "Signal": "WEEKLY COILING BASE BUY",
-                "Win Probability (%)": f"{win_prob}%",
-                "Cap Tier": cap_tier,
-                "Current Price (₹)": f"₹{cmp}",
-                "Base Formation": pattern,
-                "Indicator Setup": setup_desc,
-                "Entry Zone": entry_zone,
-                "Small SL (₹)": f"₹{sl}",
-                "Target Outlook": target_outlook,
-                "Status": "Primed for Breakout",
-                "RawVolume": df_weekly["Volume"].iloc[-1],
-                "RawWinProb": win_prob,
-                "RawScore": raw_score,
-                "RawProfitPct": target_pct,
-                "Chart": chart_link,
-            })
-        except Exception:
-            continue
-
-    df_res = pd.DataFrame(results)
-    if not df_res.empty:
-        df_res = df_res.sort_values(by=["RawProfitPct", "RawWinProb", "RawScore"], ascending=False).head(top_n_count)
-    return df_res
-
-
-def run_weekly_backtest(target_date, selected_strategy, top_n_count, universe_pool):
-    results = []
-    start_dt = datetime.combine(target_date, datetime.min.time())
-    
-    for sym in universe_pool:
-        clean_sym = sym.upper().strip()
-        if clean_sym.startswith("STOCK"):
-            continue
-        ticker_sym = f"{clean_sym}.NS"
-        try:
-            ticker = yf.Ticker(ticker_sym)
-            df_weekly = ticker.history(period="2y", interval="1wk")
-            if df_weekly.empty or len(df_weekly) < 20:
-                continue
-            if df_weekly.index.tz is not None:
-                df_weekly.index = df_weekly.index.tz_localize(None)
-                
-            df_hist = df_weekly[df_weekly.index <= pd.Timestamp(start_dt)]
-            if len(df_hist) < 15:
-                continue
-            entry_price = round(float(df_hist.iloc[-1]["Close"]), 2)
-            if entry_price < 50.0:
-                continue
-                
-            overhead_highs = df_hist["High"][df_hist["High"] > entry_price]
-            best_supply_zone = round(overhead_highs.min(), 2) if not overhead_highs.empty else round(entry_price * 1.15, 2)
-
-            sl = round(float(df_hist["Low"].iloc[-1]) * 0.96, 2)
-            risk = entry_price - sl
-            if risk <= 0:
-                continue
-            t1 = round(entry_price + (risk * 1.5), 2)
-            t2 = round(entry_price + (risk * 2.8), 2)
-            
-            df_future = df_weekly[df_weekly.index > pd.Timestamp(start_dt)].head(4)
-            if df_future.empty:
-                continue
-                
-            max_future_high = df_future["High"].max()
-            min_future_low = df_future["Low"].min()
-            final_future_close = df_future.iloc[-1]["Close"]
-            chart_link = f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-            
-            if max_future_high >= t2:
-                status, pnl_val, win_prob = ("🎯 Target 2 Hit (Highest Profit 3-4W)", round(((t2 - entry_price) / entry_price) * 100, 2), "95.5%")
-                raw_score = 95.5 + pnl_val
-            elif max_future_high >= t1:
-                status, pnl_val, win_prob = ("🎯 Target 1 Hit (1-2W)", round(((t1 - entry_price) / entry_price) * 100, 2), "82.0%")
-                raw_score = 82.0 + pnl_val
-            elif min_future_low <= sl:
-                status, pnl_val, win_prob = ("🛑 SL Hit", round(((sl - entry_price) / entry_price) * 100, 2), "35.0%")
-                raw_score = 35.0 - pnl_val
-            else:
-                pnl = round(((final_future_close - entry_price) / entry_price) * 100, 2)
-                status, pnl_val, win_prob = ("⏳ Active (Within 4W)", pnl, "65.0%")
-                raw_score = 65.0 + pnl
-
-            results.append({
-                "Symbol": clean_sym,
-                "Signal": selected_strategy,
-                "Win Probability (%)": win_prob,
-                "Entry Date": target_date.strftime("%Y-%m-%d"),
-                "Tight Entry (₹)": f"₹{entry_price}",
-                "Supply Zone (₹)": f"₹{best_supply_zone}",
-                "Small SL (₹)": f"₹{sl}",
-                "Target 1 (1-2W) (₹)": f"₹{t1}",
-                "Target 2 (3-4W Max Profit) (₹)": f"₹{t2}",
-                "Status": status,
-                "P&L (%)": f"{pnl_val:+.2f}%",
-                "RawPnL": pnl_val,
-                "RawScore": raw_score,
-                "Chart": chart_link,
-            })
-        except Exception:
-            continue
-            
-    df_res = pd.DataFrame(results)
-    if not df_res.empty:
-        df_res = df_res.sort_values(by=["RawPnL", "RawScore"], ascending=False).head(top_n_count)
     return df_res
 
 
@@ -1218,238 +835,154 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
 
 active_universe_pool = NIFTY_750_POOL[:universe_limit]
 
-# --- TAB 1: LIVE STRATEGIES HUB ---
+# --- TAB 1: LIVE INTRADAY STRATEGIES HUB ---
 with main_tab1:
-    st.subheader("📈 Live Strategy Scanners Hub")
+    st.subheader("📈 Live Intraday Strategy Scanners Hub")
     
-    strategy_type = st.radio(
-        "Select Strategy Category:",
-        ["Intraday Strategies", "Weekly & Swing Strategies"],
-        horizontal=True
+    selected_intra_strategy = st.selectbox(
+        "Choose Intraday Strategy Engine:",
+        [
+            "Combined Intraday Confluence Engine",
+            "15m 50-Period VMA (>=2.5x) Volume Expansion & Breakout Strategy",
+            "🔥 High-Turnover & Small-Cap / IPO Momentum Surge Strategy"
+        ]
     )
     
+    st.markdown(f"Scanning Top {universe_limit} Nifty Universe using **{selected_intra_strategy}** to output the top **{selected_count}** setups.")
     st.markdown("---")
     
-    if strategy_type == "Intraday Strategies":
-        selected_intra_strategy = st.selectbox(
-            "Choose Intraday Strategy Engine:",
-            [
-                "Combined Intraday Confluence Engine",
-                "15m 50-Period VMA (>=2.5x) Volume Expansion & Breakout Strategy",
-                "🔥 High-Turnover & Small-Cap / IPO Momentum Surge Strategy"
-            ]
-        )
-        
-        st.markdown(f"Scanning Top {universe_limit} Nifty Universe using **{selected_intra_strategy}** to output the top **{selected_count}** setups.")
-        
-        if selected_intra_strategy == "Combined Intraday Confluence Engine":
-            col_ctrl1, col_ctrl2 = st.columns([2, 1])
-            with col_ctrl1:
-                st.markdown("**Strategy Mode:** Multi-Confluence Intraday Scan (Long & Short)")
-            with col_ctrl2:
-                post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed(), key="intra_post")
+    if selected_intra_strategy == "Combined Intraday Confluence Engine":
+        col_ctrl1, col_ctrl2 = st.columns([2, 1])
+        with col_ctrl1:
+            st.markdown("**Strategy Mode:** Multi-Confluence Intraday Scan (Long & Short)")
+        with col_ctrl2:
+            post_market_toggle = st.checkbox("Force Post-Market Mode", value=is_market_closed(), key="intra_post")
 
-            if st.button("🚀 Run Combined Intraday Scan", type="primary", use_container_width=True):
-                with st.spinner("Scanning universe and evaluating combined intraday confluence signals..."):
-                    raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-                    df_b, df_s = process_combined_intraday_strategy(
-                        raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
-                    )
+        if st.button("🚀 Run Combined Intraday Scan", type="primary", use_container_width=True):
+            with st.spinner("Scanning universe and evaluating combined intraday confluence signals..."):
+                raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
+                df_b, df_s = process_combined_intraday_strategy(
+                    raw_stocks, selected_count, active_universe_pool, force_post_market=post_market_toggle
+                )
 
-                    st.session_state["strategy_scans"]["Combined Intraday Strategy"] = (df_b, df_s)
-                    st.success("Combined intraday scan completed successfully!")
+                st.session_state["strategy_scans"]["Combined Intraday Strategy"] = (df_b, df_s)
+                st.success("Combined intraday scan completed successfully!")
 
-            cached_intra_scan = st.session_state["strategy_scans"].get("Combined Intraday Strategy", (pd.DataFrame(), pd.DataFrame()))
-            df_b, df_s = cached_intra_scan
+        cached_intra_scan = st.session_state["strategy_scans"].get("Combined Intraday Strategy", (pd.DataFrame(), pd.DataFrame()))
+        df_b, df_s = cached_intra_scan
 
-            sub_tab_buy, sub_tab_sell = st.tabs([
-                f"🟢 Top {selected_count} Long Setups",
-                f"🔴 Top {selected_count} Short Setups",
-            ])
+        sub_tab_buy, sub_tab_sell = st.tabs([
+            f"🟢 Top {selected_count} Long Setups",
+            f"🔴 Top {selected_count} Short Setups",
+        ])
 
-            with sub_tab_buy:
-                if not df_b.empty:
-                    render_native_table(df_b.head(selected_count), key_prefix=f"intra_buy_combined")
-                else:
-                    st.info("Click 'Run Combined Intraday Scan' to view top buy setups.")
-
-            with sub_tab_sell:
-                if not df_s.empty:
-                    render_native_table(df_s.head(selected_count), key_prefix=f"intra_sell_combined")
-                else:
-                    st.info("No short setups found or click scan to update.")
-                    
-        elif selected_intra_strategy == "15m 50-Period VMA (>=2.5x) Volume Expansion & Breakout Strategy":
-            if st.button("🚀 Run Volume Expansion Breakout Scan", type="primary", use_container_width=True):
-                with st.spinner("Scanning 15-minute charts for 50-period VMA volume expansion breakouts..."):
-                    raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-                    df_vol_exp = process_volume_expansion_breakout_strategy(
-                        raw_stocks, selected_count, active_universe_pool
-                    )
-                    st.session_state["strategy_scans"]["Volume Expansion Breakout Strategy"] = df_vol_exp
-                    st.success("Volume expansion breakout scan completed successfully!")
-
-            df_vol_res = st.session_state["strategy_scans"].get("Volume Expansion Breakout Strategy", pd.DataFrame())
-            if not df_vol_res.empty:
-                render_native_table(df_vol_res.head(selected_count), key_prefix="vol_expansion_breakout_table")
+        with sub_tab_buy:
+            if not df_b.empty:
+                render_native_table(df_b.head(selected_count), key_prefix=f"intra_buy_combined")
             else:
-                st.info("Click the button above to run the 15m 50-Period VMA (>=2.5x) Volume Expansion Breakout scan.")
+                st.info("Click 'Run Combined Intraday Scan' to view top buy setups.")
 
-        else: # High Turnover & Small-Cap / IPO Momentum Surge Strategy
-            if st.button("🔥 Run High-Turnover Momentum Scan", type="primary", use_container_width=True):
-                with st.spinner("Scanning for single-day absolute turnover >= ₹100 Cr (catching IPOs & heavy volume runners)..."):
-                    raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
-                    df_high_turn = process_high_turnover_momentum_strategy(
-                        raw_stocks, selected_count, active_universe_pool
-                    )
-                    st.session_state["strategy_scans"]["High Turnover Momentum Strategy"] = df_high_turn
-                    st.success("High-turnover momentum scan completed successfully!")
-
-            df_turn_res = st.session_state["strategy_scans"].get("High Turnover Momentum Strategy", pd.DataFrame())
-            if not df_turn_res.empty:
-                render_native_table(df_turn_res.head(selected_count), key_prefix="high_turnover_momentum_table")
+        with sub_tab_sell:
+            if not df_s.empty:
+                render_native_table(df_s.head(selected_count), key_prefix=f"intra_sell_combined")
             else:
-                st.info("Click the button above to run the High-Turnover & Small-Cap/IPO Momentum scan.")
+                st.info("No short setups found or click scan to update.")
+                
+    elif selected_intra_strategy == "15m 50-Period VMA (>=2.5x) Volume Expansion & Breakout Strategy":
+        if st.button("🚀 Run Volume Expansion Breakout Scan", type="primary", use_container_width=True):
+            with st.spinner("Scanning 15-minute charts for 50-period VMA volume expansion breakouts..."):
+                raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
+                df_vol_exp = process_volume_expansion_breakout_strategy(
+                    raw_stocks, selected_count, active_universe_pool
+                )
+                st.session_state["strategy_scans"]["Volume Expansion Breakout Strategy"] = df_vol_exp
+                st.success("Volume expansion breakout scan completed successfully!")
 
-    else:
-        st.markdown("### 🗓️ Optimized Weekly & Swing Strategy Engine")
-        selected_weekly_strategy = st.selectbox(
-            "Choose Optimized Weekly / Swing Strategy:",
-            [
-                "Weekly Coiling & Pre-Breakout Strategy (HTML Strategy)",
-                "GTF Multi-Timeframe & Breakout Confluence Strategy",
-                "Momentum & Trend Swing Strategy",
-                "High-Running 3 EMA Crossover Strategy"
-            ]
-        )
-        
-        st.markdown(f"Selected: **{selected_weekly_strategy}** over Top {universe_limit} Nifty Universe.")
-
-        if st.button("🚀 Run Weekly / Swing Scan", type="primary", use_container_width=True):
-            with st.spinner(f"Executing scan over Top {universe_limit} Nifty stocks for: {selected_weekly_strategy}..."):
-                if "Weekly Coiling" in selected_weekly_strategy:
-                    df_res = fetch_weekly_trade_coiling_strategy(active_universe_pool, selected_count)
-                elif "GTF Multi-Timeframe" in selected_weekly_strategy:
-                    df_res = fetch_gtf_breakout_confluence_strategy(active_universe_pool, selected_count)
-                elif "Momentum & Trend" in selected_weekly_strategy:
-                    df_res = fetch_momentum_swing_strategy(active_universe_pool, selected_count)
-                else:
-                    df_res = fetch_3_ema_crossover_strategy(active_universe_pool, selected_count)
-
-                st.session_state["strategy_scans"][selected_weekly_strategy] = df_res
-                st.success("Scan completed successfully!")
-
-        df_weekly_res = st.session_state["strategy_scans"].get(selected_weekly_strategy, pd.DataFrame())
-        if not df_weekly_res.empty:
-            render_native_table(df_weekly_res.head(selected_count), key_prefix=f"strategy_tab_{selected_weekly_strategy}")
+        df_vol_res = st.session_state["strategy_scans"].get("Volume Expansion Breakout Strategy", pd.DataFrame())
+        if not df_vol_res.empty:
+            render_native_table(df_vol_res.head(selected_count), key_prefix="vol_expansion_breakout_table")
         else:
-            st.info("Select a strategy above and click the button to view live signals.")
+            st.info("Click the button above to run the 15m 50-Period VMA (>=2.5x) Volume Expansion Breakout scan.")
+
+    else: # High Turnover & Small-Cap / IPO Momentum Surge Strategy
+        if st.button("🔥 Run High-Turnover Momentum Scan", type="primary", use_container_width=True):
+            with st.spinner("Scanning for single-day absolute turnover >= ₹100 Cr (catching IPOs & heavy volume runners)..."):
+                raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
+                df_high_turn = process_high_turnover_momentum_strategy(
+                    raw_stocks, selected_count, active_universe_pool
+                )
+                st.session_state["strategy_scans"]["High Turnover Momentum Strategy"] = df_high_turn
+                st.success("High-turnover momentum scan completed successfully!")
+
+        df_turn_res = st.session_state["strategy_scans"].get("High Turnover Momentum Strategy", pd.DataFrame())
+        if not df_turn_res.empty:
+            render_native_table(df_turn_res.head(selected_count), key_prefix="high_turnover_momentum_table")
+        else:
+            st.info("Click the button above to run the High-Turnover & Small-Cap/IPO Momentum scan.")
 
 
-# --- TAB 2: BACKTESTERS HUB ---
+# --- TAB 2: INTRADAY BACKTESTER HUB ---
 with main_tab2:
-    st.subheader("📊 Strategy Backtesters Hub")
+    st.subheader("📊 Intraday Session Backtester")
+    st.markdown("### ⏱️ Intraday Session Backtester")
     
-    backtest_type = st.radio(
-        "Select Backtester Category:",
-        ["Intraday Backtester", "Weekly / Swing Backtester"],
-        horizontal=True
-    )
-    
-    st.markdown("---")
-    
-    if backtest_type == "Intraday Backtester":
-        st.markdown("### ⏱️ Intraday Session Backtester")
-        col_bt1, col_bt2, col_bt3 = st.columns(3)
-        with col_bt1:
-            backtest_date = st.date_input(
-                "📅 Select Backtest Session Date",
-                value=datetime.today().date() - timedelta(days=1),
-            )
-        with col_bt2:
-            backtest_time = st.time_input(
-                "⏱️ Select Entry Check Time",
-                value=time(9, 30),
-                step=300
-            )
-        with col_bt3:
-            direction_filter = st.selectbox(
-                "⇄ Intraday Stock Direction Option",
-                ["All (Buy & Sell)", "Buy (Long Only)", "Sell (Short Only)"]
-            )
-
-        if st.button("🚀 Run Intraday Backtest", type="primary"):
-            with st.spinner(f"Validating entries at {backtest_time.strftime('%H:%M')} over Top {universe_limit} Nifty candles..."):
-                df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count, active_universe_pool, backtest_time, direction_filter)
-                st.session_state["df_bt_results"] = df_bt
-
-        if "df_bt_results" in st.session_state and not st.session_state["df_bt_results"].empty:
-            df_bt = st.session_state["df_bt_results"].head(selected_count)
-
-            total_trades = len(df_bt)
-            allowed_trades = len(df_bt[df_bt["Entry Status"].str.contains("Allowed", na=False)])
-            t1_hits = len(df_bt[df_bt["Status"].str.contains("Target 1", na=False)])
-            t2_hits = len(df_bt[df_bt["Status"].str.contains("Target 2", na=False)])
-            sl_hits = len(df_bt[df_bt["Status"].str.contains("SL Hit", na=False)])
-            wins = t1_hits + t2_hits
-            win_rate = round((wins / allowed_trades) * 100, 2) if allowed_trades > 0 else 0.0
-            total_pnl = round(df_bt["RawPnL"].sum(), 2)
-
-            st.markdown("#### 📈 Backtest Performance Summary")
-            col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-            col_m1.metric("Total Stocks Checked", total_trades)
-            col_m2.metric("Valid Entries Allowed", allowed_trades)
-            col_m3.metric("Win Rate", f"{win_rate}%")
-            col_m4.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
-            col_m5.metric("Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}")
-            st.markdown("---")
-
-            render_native_table(df_bt, key_prefix="backtest")
-        else:
-            st.info("Select date, time filter, direction option, and click the button above to run backtesting.")
-
-    else:
-        st.markdown("### 📅 Weekly / Swing Historical Backtester")
-        bt_weekly_date = st.date_input("📅 Select Historical Weekly Entry Date", value=datetime.today().date() - timedelta(days=90))
-        selected_weekly_strat_bt = st.selectbox(
-            "Choose Strategy to Backtest:",
-            [
-                "Weekly Coiling & Pre-Breakout Strategy",
-                "GTF Multi-Timeframe & Breakout Confluence Strategy",
-                "Momentum & Trend Swing Strategy",
-                "High-Running 3 EMA Crossover Strategy"
-            ]
+    col_bt1, col_bt2, col_bt3 = st.columns(3)
+    with col_bt1:
+        backtest_date = st.date_input(
+            "📅 Select Backtest Session Date",
+            value=datetime.today().date() - timedelta(days=1),
         )
-        
-        if st.button("🚀 Run Weekly Strategy Backtest", type="primary", use_container_width=True):
-            with st.spinner("Backtesting weekly historical setups over subsequent 1-4 weeks..."):
-                df_wk_bt = run_weekly_backtest(bt_weekly_date, selected_weekly_strat_bt, selected_count, active_universe_pool)
-                st.session_state["df_weekly_bt_results"] = df_wk_bt
+    with col_bt2:
+        backtest_time = st.time_input(
+            "⏱️ Select Entry Check Time",
+            value=time(9, 30),
+            step=300
+        )
+    with col_bt3:
+        direction_filter = st.selectbox(
+            "⇄ Intraday Stock Direction Option",
+            ["All (Buy & Sell)", "Buy (Long Only)", "Sell (Short Only)"]
+        )
 
-        if "df_weekly_bt_results" in st.session_state and not st.session_state["df_weekly_bt_results"].empty:
-            df_wk_bt = st.session_state["df_weekly_bt_results"].head(selected_count)
-            total_trades = len(df_wk_bt)
-            wins = len(df_wk_bt[df_wk_bt["Status"].str.contains("Target", na=False)])
-            win_rate = round((wins / total_trades) * 100, 2) if total_trades > 0 else 0.0
-            total_pnl = round(df_wk_bt["RawPnL"].sum(), 2)
+    if st.button("🚀 Run Intraday Backtest", type="primary"):
+        with st.spinner(f"Validating entries at {backtest_time.strftime('%H:%M')} over Top {universe_limit} Nifty candles..."):
+            df_bt = run_live_backtest(backtest_date, DEFAULT_SCAN_CLAUSE, selected_count, active_universe_pool, backtest_time, direction_filter)
+            st.session_state["df_bt_results"] = df_bt
 
-            col_m1, col_m2, col_m3 = st.columns(3)
-            col_m1.metric("Total Backtested Setups", total_trades)
-            col_m2.metric("Win Rate", f"{win_rate}%")
-            col_m3.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
-            st.markdown("---")
-            render_native_table(df_wk_bt, key_prefix="weekly_backtest")
-        else:
-            st.info("Select a historical date and run the backtest to view weekly performance metrics.")
+    if "df_bt_results" in st.session_state and not st.session_state["df_bt_results"].empty:
+        df_bt = st.session_state["df_bt_results"].head(selected_count)
+
+        total_trades = len(df_bt)
+        allowed_trades = len(df_bt[df_bt["Entry Status"].str.contains("Allowed", na=False)])
+        t1_hits = len(df_bt[df_bt["Status"].str.contains("Target 1", na=False)])
+        t2_hits = len(df_bt[df_bt["Status"].str.contains("Target 2", na=False)])
+        sl_hits = len(df_bt[df_bt["Status"].str.contains("SL Hit", na=False)])
+        wins = t1_hits + t2_hits
+        win_rate = round((wins / allowed_trades) * 100, 2) if allowed_trades > 0 else 0.0
+        total_pnl = round(df_bt["RawPnL"].sum(), 2)
+
+        st.markdown("#### 📈 Backtest Performance Summary")
+        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+        col_m1.metric("Total Stocks Checked", total_trades)
+        col_m2.metric("Valid Entries Allowed", allowed_trades)
+        col_m3.metric("Win Rate", f"{win_rate}%")
+        col_m4.metric("Cumulative P&L", f"{total_pnl:+.2f}%")
+        col_m5.metric("Targets Hit (T1 / T2)", f"🎯 {t1_hits} / 🎯 {t2_hits}")
+        st.markdown("---")
+
+        render_native_table(df_bt, key_prefix="backtest")
+    else:
+        st.info("Select date, time filter, direction option, and click the button above to run backtesting.")
 
 
 # --- TAB 3: TERMINAL INFO & GUIDE ---
 with main_tab3:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
-    - **Tab 1 (Live Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the new **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
+    - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
     - **High-Turnover Engine:** Specifically designed to catch stocks pulling ₹100 Cr+ in absolute turnover on day one, solving the missing IPO / high-volume stock issue without lagging.
+    - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the Nifty universe.
     """)
 
 st.markdown("---")
-st.markdown("📌 *All institutional strategies, momentum filters, and backtesting frameworks are fully operational.*")
+st.markdown("📌 *All intraday institutional strategies, momentum filters, and backtesting frameworks are fully operational.*")
