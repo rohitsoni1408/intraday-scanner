@@ -543,13 +543,16 @@ def main():
             results = executor.map(scan_intraday_stock, stocks)
             for r in results:
                 if r:
+                    # Prevent duplicates by skipping stocks already alerted today
+                    if sent_state.get(r['ticker']) == today_str:
+                        continue
                     matches.append(r)
 
-        # Sort by highest score/probability and pick top 5
-        matches = sorted(matches, key=lambda x: x['score'], reverse=True)[:5]
+        # Sort by highest score/probability and pick top 3 fresh stocks instantly
+        matches = sorted(matches, key=lambda x: x['score'], reverse=True)[:3]
 
         if matches:
-            msg = "⚡ *TOP 5 INTRADAY CONFLUENCE ALERTS* ⚡\n\n"
+            msg = "⚡ *TOP 3 INTRADAY CONFLUENCE ALERTS* ⚡\n\n"
             for m in matches:
                 msg += (
                     f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
@@ -566,7 +569,7 @@ def main():
                 sent_state[m['ticker']] = today_str
             save_sent_state(sent_state)
         else:
-            print("No top intraday confluence setups found in this cycle.")
+            print("No new top intraday confluence setups found in this cycle.")
 
 if __name__ == "__main__":
     main()
