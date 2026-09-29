@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime
-from datetime import datetime, time, timedelta
+from datetime import datetime, time as dt_time, timedelta
+import time
 import os
 from bs4 import BeautifulSoup
 import numpy as np
@@ -56,8 +57,8 @@ def is_market_closed():
         
     if now.weekday() >= 5:
         return True
-    market_open = time(9, 15)
-    market_close = time(15, 30)
+    market_open = dt_time(9, 15)
+    market_close = dt_time(15, 30)
     return not (market_open <= now.time() <= market_close)
 
 
@@ -99,14 +100,6 @@ with config_col2:
 st.markdown("---")
 
 # --- CONSOLIDATED 4-TAB LAYOUT ---
-main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
-    "📈 Intraday Strategies Hub",
-    "📊 Intraday Backtester Hub",
-    "⚡ Top 1000 15m Scanner",
-    "📌 Terminal Info & Guide",
-    "⚙️ Custom Settings" # Placeholder if needed, maintaining clean alignment
-])
-# Let's adjust tabs to 4 clean ones:
 main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "📈 Intraday Strategies Hub",
     "📊 Intraday Backtester Hub",
@@ -1038,7 +1031,7 @@ with main_tab1:
 # --- TAB 2: INTRADAY BACKTESTER HUB ---
 with main_tab2:
     st.subheader("📊 Intraday Session Backtester")
-    st.markdown("### ⏱️️ Intraday Session Backtester")
+    st.markdown("### ⏱ Intraday Session Backtester")
     
     col_bt1, col_bt2, col_bt3 = st.columns(3)
     with col_bt1:
@@ -1049,7 +1042,7 @@ with main_tab2:
     with col_bt2:
         backtest_time = st.time_input(
             "⏱️ Select Entry Check Time",
-            value=time(9, 30),
+            value=dt_time(9, 30),
             step=300
         )
     with col_bt3:
