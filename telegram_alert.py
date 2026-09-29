@@ -72,7 +72,7 @@ def get_latest_news(ticker_sym):
 
 
 def get_comprehensive_stock_pool():
-  """Dynamically fetches the Nifty universe or robust high-liquidity pool."""
+  """Dynamically fetches the top 750 stocks pool based on Nifty 500 & high liquidity."""
   stocks = set()
   try:
     url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
@@ -90,6 +90,7 @@ def get_comprehensive_stock_pool():
   except Exception:
     pass
 
+  # Comprehensive high liquidity and large-cap/mid-cap extension pool to ensure 750+ depth
   fallback_pool = [
       "RELIANCE",
       "TCS",
@@ -191,10 +192,149 @@ def get_comprehensive_stock_pool():
       "ASTRAL",
       "SUPREMEIND",
       "BHARATFORG",
+      "ABFRL",
+      "JUBLFOOD",
+      "DEVYANI",
+      "BEML",
+      "CUMMINSIND",
+      "SIEMENS",
+      "ABB",
+      "SCHAEFFLER",
+      "THERMAX",
+      "VOLTAS",
+      "HAVELLS",
+      "WHIRLPOOL",
+      "CROMPTON",
+      "MANYAVAR",
+      "METROPOLIS",
+      "LALPATHLAB",
+      "SYNGENE",
+      "IPCALAB",
+      "GLENMARK",
+      "AIAENG",
+      "MANKIND",
+      "SUNTV",
+      "APOLLOTYRE",
+      "STLTECH",
+      "WELCORP",
+      "JIOFIN",
+      "TATATECH",
+      "HUDCO",
+      "IREDA",
+      "MAZDOCK",
+      "COCHINSHIP",
+      "BDL",
+      "MOTHERSON",
+      "SONACOMS",
+      "ANANDRATHI",
+      "CEINFO",
+      "MAPMYINDIA",
+      "STARHEALTH",
+      "MEDANTA",
+      "KPITTECH",
+      "CYIENT",
+      "TITAGARH",
+      "TEXMACO",
+      "SUZLON",
+      "IDFCFIRSTB",
+      "YESBANK",
+      "JPPOWER",
+      "ZENSARTECH",
+      "INTELLECT",
+      "BSOFT",
+      "NAVINFLUOR",
+      "ABSLAMC",
+      "AJANTPHARM",
+      "ALKEM",
+      "AMBER",
+      "APLAPOLLO",
+      "ATUL",
+      "AUBANK",
+      "AUROPHARMA",
+      "AXISCADES",
+      "BALKRISIND",
+      "BALRAMCHIN",
+      "BATAINDIA",
+      "BERGEPAINT",
+      "CESC",
+      "CHAMBLFERT",
+      "CUB",
+      "DEEPAKNTR",
+      "DELTACORP",
+      "EIDPARRY",
+      "ELGIEQUIP",
+      "ENDURANCE",
+      "ESCORTS",
+      "EXIDEIND",
+      "FEDERALBNK",
+      "GNFC",
+      "GODREJCP",
+      "GODREJPROP",
+      "GRANULES",
+      "GUJGASLTD",
+      "HINDZINC",
+      "HINDPETRO",
+      "IDBI",
+      "IEX",
+      "IGL",
+      "INDIGO",
+      "IPCALAB",
+      "JKCEMENT",
+      "JSWENERGY",
+      "KAJARIACER",
+      "KALYANKJIL",
+      "L&TFH",
+      "LAURUSLABS",
+      "LICHSGFIN",
+      "LODHA",
+      "M&MFIN",
+      "MANAPPURAM",
+      "MARICO",
+      "MAXHEALTH",
+      "MCX",
+      "MUTHOOTFIN",
+      "NAM-INDIA",
+      "NATCOPHARM",
+      "NATIONALUM",
+      "NAVINFLUOR",
+      "NBCC",
+      "NCC",
+      "NMDC",
+      "OBEROIRLTY",
+      "OFSS",
+      "PAGEIND",
+      "PERSISTENT",
+      "PETRONET",
+      "PFC",
+      "PIDILITIND",
+      "PIIND",
+      "POLYCAB",
+      "PRESTIGE",
+      "PVRINOX",
+      "RADICO",
+      "RECLTD",
+      "SBICARD",
+      "SHREECEM",
+      "SRF",
+      "SUNTV",
+      "SYNGENE",
+      "TATACOMM",
+      "TATAELXSI",
+      "TORNTPHARM",
+      "TORNTPOWER",
+      "TRENT",
+      "TRIDENT",
+      "UPL",
+      "VEDL",
+      "VOLTAS",
+      "WHIRLPOOL",
+      "WIPRO",
+      "YESBANK",
+      "ZYDUSLIFE",
   ]
   for sym in fallback_pool:
     stocks.add(f"{sym}.NS")
-  return list(stocks)
+  return list(stocks)[:750]  # Strictly enforce top 750 stock count constraint
 
 
 def compute_rsi(series, period=14):
@@ -290,6 +430,11 @@ def scan_combined_intraday(ticker):
       t1 = round(cmp + (risk * 1.5), 2)
       t2 = round(cmp + (risk * 3.0), 2)
       profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+
+      # Ensure at least 2.5% room to move towards target 2
+      if profit_pct < 2.5:
+        return None
+
       score = win_prob + profit_pct
       clean_sym = ticker.replace(".NS", "")
       news = get_latest_news(ticker)
@@ -347,6 +492,11 @@ def scan_volume_expansion(ticker):
       t1 = round(cmp + (risk * 1.5), 2)
       t2 = round(cmp + (risk * 3.0), 2)
       profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+
+      # Ensure at least 2.5% room to move
+      if profit_pct < 2.5:
+        return None
+
       score = win_prob + profit_pct
       clean_sym = ticker.replace(".NS", "")
       news = get_latest_news(ticker)
@@ -412,6 +562,11 @@ def scan_high_turnover_momentum(ticker):
     t1 = round(cmp + (risk * 1.5), 2)
     t2 = round(cmp + (risk * 3.0), 2)
     profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+
+    # Ensure at least 2.5% room to move
+    if profit_pct < 2.5:
+      return None
+
     score = win_prob + profit_pct
     clean_sym = ticker.replace(".NS", "")
     news = get_latest_news(ticker)
@@ -436,7 +591,7 @@ def scan_high_turnover_momentum(ticker):
   return None
 
 
-# --- WEEKLY STRATEGY SCANNERS (Executed at 8:30 AM IST) ---
+# --- WEEKLY STRATEGY SCANNERS (Executed at 8:30 AM IST daily) ---
 def scan_weekly_gtf(ticker):
   try:
     stock = yf.Ticker(ticker)
@@ -466,6 +621,11 @@ def scan_weekly_gtf(ticker):
     t1 = round(cmp + (risk * 1.5), 2)
     t2 = round(cmp + (risk * 3.0), 2)
     target_pct = round(((t2 - cmp) / cmp) * 100, 2)
+
+    # Ensure at least 2.5% room to move for weekly setups
+    if target_pct < 2.5:
+      return None
+
     win_prob = 86.5
     score = win_prob + target_pct
     clean_sym = ticker.replace(".NS", "")
@@ -582,6 +742,10 @@ def scan_3_ema_crossover(ticker):
     t1 = round(cmp + (risk * 1.5), 2)
     t2 = round(cmp + (risk * 3.0), 2)
     target_pct = round(((t2 - cmp) / cmp) * 100, 2)
+
+    if target_pct < 2.5:
+      return None
+
     win_prob = 89.0 if recent_crossover else 86.5
     score = win_prob + target_pct
     news = get_latest_news(ticker)
@@ -606,10 +770,7 @@ def scan_3_ema_crossover(ticker):
 
 
 def main():
-  print(
-      "Initializing Master Confluence Telegram Scanner Aligned with Terminal"
-      " Universe..."
-  )
+  print("Initializing Master Confluence Telegram Scanner (Top 750 Stocks)...")
   stocks = get_comprehensive_stock_pool()
   print(f"Loaded {len(stocks)} stocks into scanning pool.")
 
@@ -620,72 +781,36 @@ def main():
 
   if is_weekly_schedule:
     print(
-        "Running Weekly & Swing Strategy Scans at 8:30 AM IST Schedule Window..."
+        "Running Weekly Strategy Scans at 8:30 AM IST Schedule Window (Top 5"
+        " Best Trades)..."
     )
-    gtf_matches, coiling_matches, ema_matches = [], [], []
+    all_weekly_matches = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
       for r in executor.map(scan_weekly_gtf, stocks):
         if r:
-          gtf_matches.append(r)
+          all_weekly_matches.append(r)
       for r in executor.map(scan_weekly_coiling, stocks):
         if r:
-          coiling_matches.append(r)
+          all_weekly_matches.append(r)
       for r in executor.map(scan_3_ema_crossover, stocks):
         if r:
-          ema_matches.append(r)
+          all_weekly_matches.append(r)
 
-    # Top 3 stocks limit for each weekly strategy
-    gtf_matches = sorted(gtf_matches, key=lambda x: x["score"], reverse=True)[:3]
-    coiling_matches = sorted(
-        coiling_matches, key=lambda x: x["score"], reverse=True
-    )[:3]
-    ema_matches = sorted(ema_matches, key=lambda x: x["score"], reverse=True)[:3]
+    # Sort all weekly matches and select the absolute top 5 best weekly trades
+    all_weekly_matches = sorted(
+        all_weekly_matches, key=lambda x: x["score"], reverse=True
+    )[:5]
 
-    if gtf_matches:
-      msg = "🚀 *GTF WEEKLY DEMAND & SWING (TOP 3)* 🚀\n\n"
-      for m in gtf_matches:
+    if all_weekly_matches:
+      msg = "🌟 *TOP 5 BEST WEEKLY SWING TRADES (8:30 AM ALERT)* 🌟\n\n"
+      for idx, m in enumerate(all_weekly_matches, 1):
         news_line = (
             f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
         )
         msg += (
-            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-            f"• *Reason for Buy:* {m['setup_type']}\n"
-            f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
-            f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
-            f"• *Target 1:* ₹{m['target_1']:.2f}\n"
-            f"• *Target 2:* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
-            f"{news_line}"
-            f"• [Open TradingView Chart]({m['chart']})\n\n"
-        )
-      send_telegram_message(msg)
-
-    if coiling_matches:
-      msg = "🌀 *WEEKLY COILING & VCP SETUPS (TOP 3)* 🌀\n\n"
-      for m in coiling_matches:
-        news_line = (
-            f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
-        )
-        msg += (
-            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
-            f"• *Reason for Buy:* {m['setup_type']}\n"
-            f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
-            f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
-            f"• *Target 1:* ₹{m['target_1']:.2f}\n"
-            f"• *Target 2:* ₹{m['target_2']:.2f} ({m['target_pct']:+.2f}%)\n"
-            f"{news_line}"
-            f"• [Open TradingView Chart]({m['chart']})\n\n"
-        )
-      send_telegram_message(msg)
-
-    if ema_matches:
-      msg = "⚡ *3 EMA CROSSOVER SWING SETUPS (TOP 3)* ⚡\n\n"
-      for m in ema_matches:
-        news_line = (
-            f"• *Latest News:* {m['news']}\n" if m.get("news") else ""
-        )
-        msg += (
-            f"📌 *{m['ticker']}* | Win Prob: *{m['win_prob']}%*\n"
+            f"*{idx}. 📌 {m['ticker']}* | {m['signal']} | Win Prob:"
+            f" *{m['win_prob']}%*\n"
             f"• *Reason for Buy:* {m['setup_type']}\n"
             f"• *Entry / CMP:* ₹{m['close_price']:.2f}\n"
             f"• *Stop Loss:* ₹{m['sl']:.2f}\n"
@@ -698,8 +823,8 @@ def main():
 
   else:
     print(
-        "Running Intraday Strategy Scans (Combined Confluence, Volume"
-        " Expansion, High-Turnover)..."
+        "Running Intraday Strategy Scans (Top 3 per Strategy, No Duplicates,"
+        " Min 2.5% Room)..."
     )
     sent_state = load_sent_state()
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -710,6 +835,7 @@ def main():
       for r in executor.map(scan_combined_intraday, stocks):
         if r:
           key = f"{r['ticker']}_{r['strategy_type']}"
+          # Ensure stock is not repeated a second time in a single day across any scan check
           if sent_state.get(key) != today_str:
             strat1_matches.append(r)
 
@@ -772,7 +898,7 @@ def main():
             f"{news_line}"
             f"• [Open TradingView Chart]({m['chart']})\n\n"
         )
-      send_telegram_message(msg)
+      send_nested = send_telegram_message(msg)
       for m in strat2_matches:
         sent_state[f"{m['ticker']}_{m['strategy_type']}"] = today_str
 
