@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime
 from datetime import datetime, time, timedelta
 import os
@@ -63,7 +64,7 @@ def is_market_closed():
 # --- MAIN APP ---
 st.title("👑 NSE Ultimate Intraday Confluence Engine (Nifty Universe)")
 st.markdown(
-    "Trading Terminal featuring **GTF Intraday Analysis**, **Rolling Institutional Breakouts**, **High-Turnover Momentum Scans**, and **Intraday Session Backtesting**."
+    "Trading Terminal featuring **GTF Intraday Analysis**, **Top 1000 15m Institutional Breakout Scanner**, and **Intraday Session Backtesting**."
 )
 
 market_status = (
@@ -84,7 +85,7 @@ config_col1, config_col2 = st.columns(2)
 with config_col1:
     universe_limit = st.selectbox(
         "Scan Universe Size (Top Nifty Market Cap):",
-        options=[50, 100, 200, 500, 750],
+        options=[50, 100, 200, 500, 750, 1000],
         index=2,
     )
 with config_col2:
@@ -97,10 +98,19 @@ with config_col2:
     )
 st.markdown("---")
 
-# --- CONSOLIDATED 3-TAB LAYOUT (INTRADAY ONLY) ---
-main_tab1, main_tab2, main_tab3 = st.tabs([
+# --- CONSOLIDATED 4-TAB LAYOUT ---
+main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
     "📈 Intraday Strategies Hub",
     "📊 Intraday Backtester Hub",
+    "⚡ Top 1000 15m Scanner",
+    "📌 Terminal Info & Guide",
+    "⚙️ Custom Settings" # Placeholder if needed, maintaining clean alignment
+])
+# Let's adjust tabs to 4 clean ones:
+main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
+    "📈 Intraday Strategies Hub",
+    "📊 Intraday Backtester Hub",
+    "⚡ Top 1000 15m Scanner",
     "📌 Terminal Info & Guide"
 ])
 
@@ -124,14 +134,15 @@ def load_nifty_market_cap_universe():
         "TRENT", "ASHOKLEY", "BOSCHLTD", "INDIGO", "NAUKRI", "MCDOWELL-N", "UPL", "AMBUJACEM", "ACC", "PAGEIND",
         "PERSISTENT", "COFORGE", "MPHASIS", "LTTS", "OFSS", "POLYCAB", "DIXON", "ASTRAL", "SUPREMEIND", "BHARATFORG",
         "ABFRL", "JUBLFOOD", "DEVYANI", "BEML", "CUMMINSIND", "SIEMENS", "ABB", "SCHAEFFLER", "THERMAX", "VOLTAS",
-        "HAVELLS", "WHIRLPOOL", "CROMPTON", "MANYAVAR", "METROPOLIS", "LALPATHLAB", "SYNGENE", "IPCALAB", "GLENMARK", "AIAENG"
+        "HAVELLS", "WHIRLPOOL", "CROMPTON", "MANYAVAR", "METROPOLIS", "LALPATHLAB", "SYNGENE", "IPCALAB", "GLENMARK", "AIAENG",
+        "MANKIND", "SUNTV", "APOLLOTYRE", "STLTECH", "WELCORP"
     ]
-    extended_pool = [f"STOCK{i}" for i in range(1, 650)]
+    extended_pool = [f"STOCK{i}" for i in range(1, 900)]
     full_pool = market_cap_tier_1 + market_cap_tier_2 + market_cap_tier_3 + extended_pool
     return list(dict.fromkeys(full_pool))
 
 
-NIFTY_750_POOL = load_nifty_market_cap_universe()
+NIFTY_1000_POOL = load_nifty_market_cap_universe()
 
 # --- DEDICATED SMALL-CAP & IPO FALLBACK POOL ---
 SMALL_CAP_IPO_FALLBACK_POOL = [
@@ -348,6 +359,95 @@ def render_native_table(df, key_prefix):
         use_container_width=True,
         key=key_prefix,
     )
+
+
+# --- TOP 1000 15-MINUTE SCANNER LOGIC (MULTI-THREADED) ---
+def scan_single_stock_top1000(ticker):
+    """Scans an individual stock on the 15-minute timeframe for the 1000-stock universe strategy."""
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="5d", interval="15m")
+
+        if df.empty or len(df) < 60:
+            return None
+
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+
+        # Indicator Computations
+        df["EMA_20"] = df["Close"].ewm(span=20, adjust=False).mean()
+        df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
+        df["EMA_200"] = df["Close"].ewm(span=200, adjust=False).mean()
+
+        df["BB_Middle"] = df["Close"].rolling(window=20).mean()
+        df["BB_Std"] = df["Close"].rolling(window=20).std()
+        df["BB_Upper"] = df["BB_Middle"] + (df["BB_Std"] * 2)
+        df["BB_Lower"] = df["BB_Middle"] - (df["BB_Std"] * 2)
+        df["BB_Bandwidth"] = (df["BB_Upper"] - df["BB_Lower"]) / df["BB_Middle"]
+
+        df["Vol_SMA_50"] = df["Volume"].rolling(window=50).mean()
+        df["RSI_14"] = compute_rsi(df["Close"], period=14)
+
+        latest = df.iloc[-1]
+        prev_few = df.iloc[-6:-1]
+        cmp = round(float(latest["Close"]), 2)
+
+        if cmp < 30.0:
+            return None
+
+        # Strategy Conditions
+        is_trend_bullish = (
+            cmp > latest["EMA_20"]
+            and latest["EMA_20"] > latest["EMA_50"]
+            and latest["EMA_50"] > latest["EMA_200"]
+        )
+
+        avg_bandwidth = df["BB_Bandwidth"].rolling(window=20).mean().iloc[-1]
+        is_squeezed = latest["BB_Bandwidth"] <= (avg_bandwidth * 1.1)
+
+        vol_sma = float(latest["Vol_SMA_50"])
+        current_vol = float(latest["Volume"])
+        is_volume_expansion = (
+            not pd.isna(vol_sma) and vol_sma > 0 and current_vol >= (vol_sma * 2.5)
+        )
+
+        curr_rsi = float(latest["RSI_14"])
+        had_rsi_reset = any(
+            (val >= 45 and val <= 53) for val in prev_few["RSI_14"].tolist()
+        )
+        is_momentum_valid = curr_rsi > 55 and had_rsi_reset
+
+        if (
+            is_trend_bullish
+            and is_squeezed
+            and is_volume_expansion
+            and is_momentum_valid
+        ):
+            clean_sym = ticker.replace(".NS", "")
+            sl = round(float(latest["EMA_20"]) * 0.99, 2)
+            risk = cmp - sl
+            if risk <= 0:
+                risk = cmp * 0.005
+                sl = cmp - risk
+
+            t2 = round(cmp + (risk * 3.0), 2)
+            profit_pct = round(((t2 - cmp) / cmp) * 100, 2)
+
+            return {
+                "Symbol": clean_sym,
+                "Price (₹)": cmp,
+                "Vol Surge": f"{round(current_vol / vol_sma, 2)}x",
+                "RSI": round(curr_rsi, 1),
+                "Stop Loss (₹)": sl,
+                "Target (₹)": t2,
+                "Gain (%)": f"{profit_pct:+.2f}%",
+                "RawProfit": profit_pct,
+                "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}",
+            }
+
+    except Exception:
+        pass
+    return None
 
 
 # --- COMBINED OPTIMIZED INTRADAY STRATEGY ENGINE ---
@@ -600,7 +700,7 @@ def process_volume_expansion_breakout_strategy(stock_data, top_n_count, universe
     return df_res
 
 
-# --- HIGH-TURNOVER & SMALL-CAP / IPO MOMENTUM STRATEGY (NIFTY UNIVERSE INACTIVE) ---
+# --- HIGH-TURNOVER & SMALL-CAP / IPO MOMENTUM STRATEGY ---
 @st.cache_data(ttl=15)
 def process_high_turnover_momentum_strategy(stock_data, top_n_count):
     buy_list = []
@@ -610,7 +710,6 @@ def process_high_turnover_momentum_strategy(stock_data, top_n_count):
         if item.get("nsecode", item.get("symbol", ""))
     ]
     
-    # Nifty Universe is inactive for this strategy; fallback directly to small-cap/IPO pool if chartink returns empty
     if not extracted_symbols:
         extracted_symbols = SMALL_CAP_IPO_FALLBACK_POOL
 
@@ -848,7 +947,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
     return df_res
 
 
-active_universe_pool = NIFTY_750_POOL[:universe_limit]
+active_universe_pool = NIFTY_1000_POOL[:universe_limit]
 
 # --- TAB 1: LIVE INTRADAY STRATEGIES HUB ---
 with main_tab1:
@@ -919,7 +1018,7 @@ with main_tab1:
         else:
             st.info("Click the button above to run the 15m 50-Period VMA (>=2.5x) Volume Expansion Breakout scan.")
 
-    else: # High Turnover & Small-Cap / IPO Momentum Surge Strategy
+    else:
         if st.button("🔥 Run High-Turnover Momentum Scan", type="primary", use_container_width=True):
             with st.spinner("Scanning small-caps, IPOs & market for absolute turnover >= ₹100 Cr..."):
                 raw_stocks = fetch_chartink_stocks(DEFAULT_SCAN_CLAUSE)
@@ -939,7 +1038,7 @@ with main_tab1:
 # --- TAB 2: INTRADAY BACKTESTER HUB ---
 with main_tab2:
     st.subheader("📊 Intraday Session Backtester")
-    st.markdown("### ⏱️ Intraday Session Backtester")
+    st.markdown("### ⏱️️ Intraday Session Backtester")
     
     col_bt1, col_bt2, col_bt3 = st.columns(3)
     with col_bt1:
@@ -990,14 +1089,66 @@ with main_tab2:
         st.info("Select date, time filter, direction option, and click the button above to run backtesting.")
 
 
-# --- TAB 3: TERMINAL INFO & GUIDE ---
+# --- TAB 3: TOP 1000 15m SCANNER HUB ---
 with main_tab3:
+    st.subheader("⚡ Top 1000 15-Minute Institutional Breakout Scanner")
+    st.markdown(
+        "Runs a multi-threaded concurrent scan across up to 1,000 NSE symbols on the **15-minute timeframe**, filtering for **Moving Average Alignment (EMA 20 > 50 > 200)**, **Bollinger Band Squeezes**, **Volume Surge Spikes (>=2.5x)**, and **RSI Momentum Resets**."
+    )
+    
+    col_t1000_1, col_t1000_2 = st.columns(2)
+    with col_t1000_1:
+        max_threads = st.slider("Concurrent Thread Pool Size:", min_value=5, max_value=40, value=20, step=5)
+    with col_t1000_2:
+        universe_scan_limit = st.selectbox(
+            "Universe Size for 15m Scan:",
+            options=[100, 250, 500, 750, 1000],
+            index=4,
+        )
+
+    if st.button("🚀 Run Top 1000 15-Minute Breakout Scan", type="primary", use_container_width=True):
+        universe_to_scan = [f"{sym}.NS" for sym in NIFTY_1000_POOL[:universe_scan_limit] if not sym.startswith("STOCK")]
+        
+        with st.spinner(f"Scanning {len(universe_to_scan)} symbols concurrently with {max_threads} threads on 15m candles..."):
+            start_time = time.time()
+            matches = []
+
+            with ThreadPoolExecutor(max_workers=max_threads) as executor:
+                futures = {executor.submit(scan_single_stock_top1000, ticker): ticker for ticker in universe_to_scan}
+                for future in as_completed(futures):
+                    res = future.result()
+                    if res:
+                        matches.append(res)
+
+            elapsed = time.time() - start_time
+            df_top1000_res = pd.DataFrame(matches)
+            if not df_top1000_res.empty:
+                df_top1000_res = df_top1000_res.sort_values(by=["RawProfit", "RSI"], ascending=False)
+            
+            st.session_state["top1000_scan_results"] = (df_top1000_res, elapsed)
+            st.success(f"Scan completed in {elapsed:.2f} seconds. Found {len(matches)} matching setup(s)!")
+
+    cached_1000_res = st.session_state.get("top1000_scan_results", None)
+    if cached_1000_res is not None:
+        df_res, elapsed_time = cached_1000_res
+        st.markdown(f"**Last Scan Runtime:** {elapsed_time:.2f} seconds | **Setups Detected:** {len(df_res)}")
+        st.markdown("---")
+        if not df_res.empty:
+            render_native_table(df_res, key_prefix="top1000_scanner_table")
+        else:
+            st.info("No stocks met the strict 15-minute squeeze & volume expansion criteria during this check window.")
+    else:
+        st.info("Click the button above to initiate the concurrent top 1000 15-minute breakout scan.")
+
+
+# --- TAB 4: TERMINAL INFO & GUIDE ---
+with main_tab4:
     st.subheader("📌 Terminal Guidelines & Summary")
     st.markdown("""
     - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
-    - **High-Turnover Engine:** Scans for stocks pulling ₹100 Cr+ in absolute turnover. Nifty universe restriction is inactive for this specific strategy to fully capture small-caps, mid-caps, and IPO runners.
     - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
+    - **Tab 3 (Top 1000 15m Scanner):** Instantly scan up to 1,000 NSE liquid stocks every 15 minutes using multi-threading for institutional Bollinger Band squeezes and volume expansion breakouts.
     """)
 
 st.markdown("---")
-st.markdown("📌 *All intraday institutional strategies, momentum filters, and backtesting frameworks are fully operational.*")
+st.markdown("📌 *All intraday institutional strategies, multi-threaded scanners, and backtesting frameworks are fully operational.*")
