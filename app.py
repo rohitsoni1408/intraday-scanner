@@ -95,7 +95,6 @@ market_status = (
 st.markdown(f"**Market Status:** {market_status} | **Default Active Session Date:** {get_last_trading_date()}")
 st.markdown("---")
 
-# Initialize Strategy Scan Storage in Session State
 if "strategy_scans" not in st.session_state:
     st.session_state["strategy_scans"] = {}
 
@@ -129,7 +128,6 @@ main_tab_weekly, main_tab1, main_tab2, main_tab_gainer_loser, main_tab3, main_ta
 ])
 
 
-# --- OFFICIAL TOP 50 NSE F&O MARKET CAP UNIVERSE POOL ---
 @st.cache_data(ttl=86400)
 def load_top_50_fno_universe():
     top_50_fno = [
@@ -462,7 +460,7 @@ def render_native_table(df, key_prefix):
         return
 
     display_cols = [
-        col for col in df.columns if col not in ["RawVolume", "RawWinProb", "RawScore", "RawProfitPct", "RawPnL", "RawProfit", "DataFrame1m", "RawChg", "RawDelta"]
+        col for col in df.columns if col not in ["RawVolume", "RawWinProb", "RawScore", "RawProfitPct", "RawPnL", "RawProfit", "DataFrame1m", "RawChg", "RawDelta", "Cond1_Pass", "Cond2_Pass", "Cond3_Pass"]
     ]
     df_to_show = df[display_cols].copy()
 
@@ -1099,44 +1097,60 @@ def run_fno_916_analysis_top50(target_date, category, top_n=3):
             close_916 = float(row_916["Close"])
             high_916 = float(row_916["High"])
             low_916 = float(row_916["Low"])
+            p_930 = float(row_930["Close"])
             
             prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
             
-            # --- STRICT CONDITION CHECK WITH REJECTION REASON INDICATION ---
-            if category == "Top Gainers":
-                if close_915 <= prev_close or close_915 <= open_915:
-                    continue  # Filtered out: 9:15 candle was not bullish/above previous close
-                if close_916 <= close_915 or high_916 <= high_915:
-                    continue  # Filtered out: 9:16 candle failed to break above 09:15 high / reversed down
-            else:
-                if close_915 >= prev_close or close_915 >= open_915:
-                    continue  # Filtered out: 9:15 candle was not bearish/below previous close
-                if close_916 >= close_915 or low_916 >= low_915:
-                    continue  # Filtered out: 9:16 candle failed to break below 09:15 low / recovered up
-                
-            p_930 = float(row_930["Close"])
-            current_close = float(df_day.iloc[-1]["Close"])
+            # --- STRICT CONDITION EVALUATION IN 1 -> 2 -> 3 SEQUENCE ---
+            cond1_pass = False
+            cond2_pass = False
+            cond3_pass = False
             
+            if category == "Top Gainers":
+                # Condition 1: 9:15 1st candle close > prev close and > open
+                if close_915 > prev_close and close_915 >= open_915:
+                    cond1_pass = True
+                
+                # Condition 2: 9:16 candle continuation (close > 9:15 close and high >= 9:15 high)
+                if cond1_pass and (close_916 > close_915 and high_916 >= high_915):
+                    cond2_pass = True
+                    
+                # Condition 3: 9:30 momentum follow-through (9:30 price > 9:16 close)
+                if cond2_pass and (p_930 > close_916):
+                    cond3_pass = True
+            else:
+                # Condition 1: 9:15 1st candle close < prev close and < open
+                if close_915 < prev_close and close_915 <= open_915:
+                    cond1_pass = True
+                
+                # Condition 2: 9:16 candle continuation (close < 9:15 close and low <= 9:15 low)
+                if cond1_pass and (close_916 < close_915 and low_916 <= low_915):
+                    cond2_pass = True
+                    
+                # Condition 3: 9:30 momentum follow-through (9:30 price < 9:16 close)
+                if cond2_pass and (p_930 < close_916):
+                    cond3_pass = True
+            
+            # Strict Filtering: Require all 3 conditions to pass sequentially
+            if not (cond1_pass and cond2_pass and cond3_pass):
+                continue
+                
+            current_close = float(df_day.iloc[-1]["Close"])
             chg_916_pct = ((close_916 - prev_close) / prev_close) * 100
             chg_span_pct = ((p_930 - close_916) / close_916) * 100
             
-            if category == "Top Gainers":
-                is_continued = p_930 > close_916
-                status = f"✅ Continued Up (at 09:30)" if is_continued else "❌ Reversed / Dropped"
-            else:
-                is_continued = p_930 < close_916
-                status = f"✅ Continued Down (at 09:30)" if is_continued else "❌ Reversed / Recovered"
+            status = "✅ All 3 Conditions Fulfilled"
                 
             results.append({
                 "Date": target_date.strftime("%Y-%m-%d"),
                 "Symbol": clean_sym,
+                "Cond 1 (9:15 Close)": "✅ Pass" if cond1_pass else "❌ Fail",
+                "Cond 2 (9:16 Breakout)": "✅ Pass" if cond2_pass else "❌ Fail",
+                "Cond 3 (9:30 Momentum)": "✅ Pass" if cond3_pass else "❌ Fail",
                 "9:16 Price (₹)": round(close_916, 2),
                 "9:30 Price (₹)": round(p_930, 2),
-                "Current / Close (₹)": round(current_close, 2),
-                "9:16 to 9:30 Change (%)": f"{chg_span_pct:+.2f}%",
-                "Continuation Status": status,
+                "Status": status,
                 "RawChg": chg_916_pct,
-                "RawDelta": chg_span_pct,
                 "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
             })
         except Exception:
@@ -1198,43 +1212,42 @@ def run_fno_backtest_top50(from_date, to_date, category, top_n=3):
                     close_916 = float(row_916["Close"])
                     high_916 = float(row_916["High"])
                     low_916 = float(row_916["Low"])
+                    p_930 = float(row_930["Close"])
                     
                     prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
                     
-                    if category == "Top Gainers":
-                        if close_915 <= prev_close or close_915 <= open_915:
-                            continue
-                        if close_916 <= close_915 or high_916 <= high_915:
-                            continue
-                    else:
-                        if close_915 >= prev_close or close_915 >= open_915:
-                            continue
-                        if close_916 >= close_915 or low_916 >= low_915:
-                            continue
-                        
-                    p_930 = float(row_930["Close"])
-                    current_close = float(df_day.iloc[-1]["Close"])
+                    cond1_pass, cond2_pass, cond3_pass = False, False, False
                     
+                    if category == "Top Gainers":
+                        if close_915 > prev_close and close_915 >= open_915:
+                            cond1_pass = True
+                        if cond1_pass and (close_916 > close_915 and high_916 >= high_915):
+                            cond2_pass = True
+                        if cond2_pass and (p_930 > close_916):
+                            cond3_pass = True
+                    else:
+                        if close_915 < prev_close and close_915 <= open_915:
+                            cond1_pass = True
+                        if cond1_pass and (close_916 < close_915 and low_916 <= low_915):
+                            cond2_pass = True
+                        if cond2_pass and (p_930 < close_916):
+                            cond3_pass = True
+                            
+                    if not (cond1_pass and cond2_pass and cond3_pass):
+                        continue
+                        
                     chg_916_pct = ((close_916 - prev_close) / prev_close) * 100
-                    chg_span_pct = ((p_930 - close_916) / close_916) * 100
                     
-                    if category == "Top Gainers":
-                        is_continued = p_930 > close_916
-                        status = f"✅ Continued Up (at 09:30)" if is_continued else "❌ Reversed / Dropped"
-                    else:
-                        is_continued = p_930 < close_916
-                        status = f"✅ Continued Down (at 09:30)" if is_continued else "❌ Reversed / Recovered"
-                        
                     day_results.append({
                         "Date": current_date.strftime("%Y-%m-%d"),
                         "Symbol": clean_sym,
+                        "Cond 1 (9:15 Close)": "✅ Pass",
+                        "Cond 2 (9:16 Breakout)": "✅ Pass",
+                        "Cond 3 (9:30 Momentum)": "✅ Pass",
                         "9:16 Price (₹)": round(close_916, 2),
                         "9:30 Price (₹)": round(p_930, 2),
-                        "Current / Close (₹)": round(current_close, 2),
-                        "9:16 to 9:30 Change (%)": f"{chg_span_pct:+.2f}%",
-                        "Status": status,
+                        "Status": "✅ All 3 Conditions Fulfilled",
                         "RawChg": chg_916_pct,
-                        "RawDelta": chg_span_pct,
                         "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
                     })
                 except Exception:
@@ -1419,18 +1432,17 @@ with main_tab2:
 with main_tab_gainer_loser:
     st.subheader("⚡ F&O 9:15 to 9:30 Gainer / Loser & Backtesting Hub (Top 50 Nifty F&O Universe)")
     st.markdown(
-        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (strictly validating that the 09:15 candle meets trend criteria AND the 09:16 candle immediately breaks out) and tracks momentum continuation at 9:30 AM."
+        "Strict 3-Condition Sequential Validation: **Condition 1 (09:15 Close)** $\rightarrow$ **Condition 2 (09:16 Breakout)** $\rightarrow$ **Condition 3 (09:30 Momentum)**."
     )
     
     default_session_date = get_last_trading_date()
     
-    # --- LIVE / LAST ACTIVE SESSION SUMMARY (9:16 to 9:30) ---
-    st.markdown("### 📊 Top 3 Session Summary (9:16 Detection & 9:30 Result)")
+    st.markdown("### 📊 Top 3 Session Summary (Sequential Condition Ticks)")
     top_col1, top_col2 = st.columns(2)
     with top_col1:
         top_category = st.selectbox("Select Category", ["Top Gainers", "Top Losers"], key="top_always_cat")
     with top_col2:
-        st.markdown("**Fixed Window:** 9:16 Initial Detection -> 9:30 Result (Top 3)")
+        st.markdown("**Validation Rule:** All 3 conditions must pass sequentially.")
 
     top_cache_key = f"fno_top_50_session_{default_session_date}_{top_category}"
     if top_cache_key not in st.session_state:
@@ -1441,12 +1453,11 @@ with main_tab_gainer_loser:
     if not df_top_res.empty:
         render_native_table(df_top_res, key_prefix="fno_top_50_table")
     else:
-        st.warning("⚠️ **Fewer/Zero Stocks Displayed Notice:** On this session date, stocks that initially opened with a gap/spike failed to satisfy the strict secondary filter (either the 09:15 candle was not aligned with the previous close, or the 09:16 candle immediately reversed/failed to break the 09:15 range). Only stocks passing both strict conditions are shown.")
-        st.info("No stocks met the strict criteria for the active session.")
+        st.warning("⚠️ **Fewer/Zero Stocks Notice:** Stocks appearing fewer in number or missing failed one of the sequential conditions (Cond 1 09:15 close, Cond 2 09:16 breakout, or Cond 3 09:30 follow-through).")
+        st.info("No stocks met all 3 sequential conditions for the active session.")
 
     st.markdown("---")
     
-    # --- HISTORICAL BACKTESTING OPTIONS SECTION (DATE RANGE ONLY) ---
     st.markdown("### 🔬 Historical Backtesting (Date Range)")
     bt_col1, bt_col2, bt_col3 = st.columns(3)
     with bt_col1:
@@ -1457,7 +1468,7 @@ with main_tab_gainer_loser:
         bt_category = st.selectbox("Backtest Category", ["Top Gainers", "Top Losers"], key="fno_bt_cat")
 
     if st.button("🚀 Run F&O Date Range Backtest", type="primary", key="btn_run_fno_range_bt"):
-        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} (9:16 to 9:30 with strict filtering)..."):
+        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} with 3 sequential condition ticks..."):
             df_range_bt = run_fno_backtest_top50(bt_from_date, bt_to_date, bt_category, 3)
             st.session_state["fno_range_bt_results"] = df_range_bt
             st.success("F&O date range backtest completed successfully!")
@@ -1467,7 +1478,7 @@ with main_tab_gainer_loser:
         st.markdown(f"#### 📊 Backtest Results ({bt_from_date} to {bt_to_date})")
         render_native_table(cached_range_bt, key_prefix="fno_range_bt_table")
     else:
-        st.warning("⚠️ **Fewer/Zero Stocks Notice:** Days with fewer or missing entries indicate that top gainer/loser candidates failed the strict 09:15/09:16 continuation and breakout filter.")
+        st.warning("⚠️ **Fewer Stocks Notice:** Days with fewer entries indicate candidates failed Cond 1, Cond 2, or Cond 3.")
         st.info("Select date range and click 'Run F&O Date Range Backtest'.")
 
 
@@ -1530,10 +1541,10 @@ with main_tab4:
     - **Tab 📅 (Weekly Trade Strategy):** Scan higher timeframes for weekly swing breakout and swing trade setups.
     - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
     - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
-    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM with strict 09:15 candle alignment and immediate 09:16 breakout validation, displaying fewer rows with explanatory warnings when conditions aren't met.
+    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Sequential 3-condition validation with explicit tick marks (`Cond 1`, `Cond 2`, `Cond 3`) displayed in tables.
     - **Tab 4 (Top 1000 15m Scanner):** Instantly scan up to 1,000 NSE liquid stocks every 15 minutes using multi-threading for institutional Bollinger Band squeezes and volume expansion breakouts.
     - **Tab 5 (📌 Terminal Info & Guide):** Read terminal usage notes and instructions.
     """)
 
 st.markdown("---")
-st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub with strict condition matching and fewer-stock diagnostic warnings, backtesting range engine, and multi-threaded scanners are fully operational.*")
+st.markdown("📌 *Sequential 3-condition validation with explicit pass/fail tick marks for each condition is fully implemented and operational.*")
