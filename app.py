@@ -1090,15 +1090,26 @@ def run_fno_916_analysis_top50(target_date, category, top_n=3):
             
             open_915 = float(row_916["Open"])
             close_916 = float(row_916["Close"])
+            high_915 = float(row_916["High"])
+            low_915 = float(row_916["Low"])
             prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
             
-            # Strict Filtering: Top Gainer must be > Prev Close and Green 1-min candle; Top Loser must be < Prev Close and Red 1-min candle
+            # Slice candles between 09:16 and 09:30 to verify entry/breakout condition
+            df_sub = df_day[(df_day.index.time >= dt_time(9, 16)) & (df_day.index.time <= dt_time(9, 30))]
+            if df_sub.empty:
+                continue
+            
+            # Strict Filtering & Entry Breakout Validation:
             if category == "Top Gainers":
                 if close_916 <= prev_close or close_916 <= open_915:
                     continue
+                if df_sub['High'].max() <= high_915:
+                    continue  # Subsequent candles did not go up / break above the first 1-min candle high
             else:
                 if close_916 >= prev_close or close_916 >= open_915:
                     continue
+                if df_sub['Low'].min() >= low_915:
+                    continue  # Subsequent candles did not go down / break below the first 1-min candle low
                 
             p_930 = float(row_930["Close"])
             current_close = float(df_day.iloc[-1]["Close"])
@@ -1175,13 +1186,23 @@ def run_fno_backtest_top50(from_date, to_date, category, top_n=3):
                     
                     open_915 = float(row_916["Open"])
                     close_916 = float(row_916["Close"])
+                    high_915 = float(row_916["High"])
+                    low_915 = float(row_916["Low"])
                     prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
+                    
+                    df_sub = df_day[(df_day.index.time >= dt_time(9, 16)) & (df_day.index.time <= dt_time(9, 30))]
+                    if df_sub.empty:
+                        continue
                     
                     if category == "Top Gainers":
                         if close_916 <= prev_close or close_916 <= open_915:
                             continue
+                        if df_sub['High'].max() <= high_915:
+                            continue
                     else:
                         if close_916 >= prev_close or close_916 >= open_915:
+                            continue
+                        if df_sub['Low'].min() >= low_915:
                             continue
                         
                     p_930 = float(row_930["Close"])
@@ -1391,7 +1412,7 @@ with main_tab2:
 with main_tab_gainer_loser:
     st.subheader("⚡ F&O 9:15 to 9:30 Gainer / Loser & Backtesting Hub (Top 50 Nifty F&O Universe)")
     st.markdown(
-        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (strictly filtering for green/red first 1-minute candle relative to previous close) and tracks momentum continuation at 9:30 AM."
+        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (strictly validating breakout beyond the first 1-min candle range between 9:16 and 9:30) and tracks momentum continuation at 9:30 AM."
     )
     
     default_session_date = get_last_trading_date()
@@ -1413,7 +1434,7 @@ with main_tab_gainer_loser:
     if not df_top_res.empty:
         render_native_table(df_top_res, key_prefix="fno_top_50_table")
     else:
-        st.info("No stocks met the criteria for the active session.")
+        st.info("No stocks met the strict entry breakout criteria for the active session.")
 
     st.markdown("---")
     
@@ -1428,7 +1449,7 @@ with main_tab_gainer_loser:
         bt_category = st.selectbox("Backtest Category", ["Top Gainers", "Top Losers"], key="fno_bt_cat")
 
     if st.button("🚀 Run F&O Date Range Backtest", type="primary", key="btn_run_fno_range_bt"):
-        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} (9:16 to 9:30)..."):
+        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} (9:16 to 9:30 with breakout validation)..."):
             df_range_bt = run_fno_backtest_top50(bt_from_date, bt_to_date, bt_category, 3)
             st.session_state["fno_range_bt_results"] = df_range_bt
             st.success("F&O date range backtest completed successfully!")
@@ -1500,10 +1521,10 @@ with main_tab4:
     - **Tab 📅 (Weekly Trade Strategy):** Scan higher timeframes for weekly swing breakout and swing trade setups.
     - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
     - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
-    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM (with strict previous close & first 1-min candle filters) and tracked for continuation at 9:30 AM.
+    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM with strict 9:16–9:30 breakout validation and tracked for continuation at 9:30 AM.
     - **Tab 4 (Top 1000 15m Scanner):** Instantly scan up to 1,000 NSE liquid stocks every 15 minutes using multi-threading for institutional Bollinger Band squeezes and volume expansion breakouts.
     - **Tab 5 (📌 Terminal Info & Guide):** Read terminal usage notes and instructions.
     """)
 
 st.markdown("---")
-st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub with strict filtering, backtesting range engine, multi-threaded scanners, and chart inspectors are fully operational.*")
+st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub with strict entry breakout validation, backtesting range engine, and multi-threaded scanners are fully operational.*")
