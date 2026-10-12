@@ -1056,11 +1056,14 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
 
 def run_fno_916_analysis_top50(target_date, category, top_n=3):
     fno_list = TOP_50_FNO_POOL
-    results = []
+    step1_pool = []
     
     start_dt = datetime.combine(target_date, datetime.min.time())
     end_dt = start_dt + timedelta(days=1)
     
+    # ==========================================
+    # STEP 1: Evaluate Condition 1 (9:15 Candle)
+    # ==========================================
     for symbol in fno_list:
         clean_sym = symbol.upper().strip()
         if clean_sym.startswith("STOCK"):
@@ -1086,10 +1089,58 @@ def run_fno_916_analysis_top50(target_date, category, top_n=3):
             df_day['diff_930'] = abs(df_day.index - pd.Timestamp(t_930))
             
             row_915 = df_day.loc[df_day['diff_915'].idxmin()]
+            open_915 = float(row_915["Open"])
+            close_915 = float(row_915["Close"])
+            
+            prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
+            
+            cond1_pass = False
+            if category == "Top Gainers":
+                if close_915 > prev_close and close_915 >= open_915:
+                    cond1_pass = True
+            else:
+                if close_915 < prev_close and close_915 <= open_915:
+                    cond1_pass = True
+            
+            if cond1_pass:
+                chg_915_pct = ((close_915 - prev_close) / prev_close) * 100
+                step1_pool.append({
+                    "symbol": clean_sym,
+                    "ticker": ticker,
+                    "df_day": df_day,
+                    "prev_close": prev_close,
+                    "row_915": row_915,
+                    "raw_metric": chg_915_pct
+                })
+        except Exception:
+            continue
+            
+    # Sort and keep top 3 stocks fulfilling Condition 1
+    df_step1 = pd.DataFrame(step1_pool)
+    if df_step1.empty:
+        return pd.DataFrame()
+        
+    if category == "Top Gainers":
+        df_step1 = df_step1.sort_values(by="raw_metric", ascending=False).head(top_n)
+    else:
+        df_step1 = df_step1.sort_values(by="raw_metric", ascending=True).head(top_n)
+        
+    final_results = []
+    
+    # =========================================================
+    # STEP 2 & STEP 3: Evaluate Condition 2 (9:16) & Condition 3 (9:30)
+    # =========================================================
+    for _, item in df_step1.iterrows():
+        clean_sym = item["symbol"]
+        ticker = item["ticker"]
+        df_day = item["df_day"]
+        prev_close = item["prev_close"]
+        row_915 = item["row_915"]
+        
+        try:
             row_916 = df_day.loc[df_day['diff_916'].idxmin()]
             row_930 = df_day.loc[df_day['diff_930'].idxmin()]
             
-            open_915 = float(row_915["Open"])
             close_915 = float(row_915["Close"])
             high_915 = float(row_915["High"])
             low_915 = float(row_915["Low"])
@@ -1099,170 +1150,53 @@ def run_fno_916_analysis_top50(target_date, category, top_n=3):
             low_916 = float(row_916["Low"])
             p_930 = float(row_930["Close"])
             
-            prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
-            
-            # --- STRICT CONDITION EVALUATION IN 1 -> 2 -> 3 SEQUENCE ---
-            cond1_pass = False
             cond2_pass = False
             cond3_pass = False
             
             if category == "Top Gainers":
-                # Condition 1: 9:15 1st candle close > prev close and > open
-                if close_915 > prev_close and close_915 >= open_915:
-                    cond1_pass = True
-                
-                # Condition 2: 9:16 candle continuation (close > 9:15 close and high >= 9:15 high)
-                if cond1_pass and (close_916 > close_915 and high_916 >= high_915):
+                # Condition 2: 9:16 Breakout
+                if close_916 > close_915 and high_916 >= high_915:
                     cond2_pass = True
-                    
-                # Condition 3: 9:30 momentum follow-through (9:30 price > 9:16 close)
+                # Condition 3: 9:30 Momentum
                 if cond2_pass and (p_930 > close_916):
                     cond3_pass = True
             else:
-                # Condition 1: 9:15 1st candle close < prev close and < open
-                if close_915 < prev_close and close_915 <= open_915:
-                    cond1_pass = True
-                
-                # Condition 2: 9:16 candle continuation (close < 9:15 close and low <= 9:15 low)
-                if cond1_pass and (close_916 < close_915 and low_916 <= low_915):
+                # Condition 2: 9:16 Breakdown
+                if close_916 < close_915 and low_916 <= low_915:
                     cond2_pass = True
-                    
-                # Condition 3: 9:30 momentum follow-through (9:30 price < 9:16 close)
+                # Condition 3: 9:30 Momentum
                 if cond2_pass and (p_930 < close_916):
                     cond3_pass = True
-            
-            # Strict Filtering: Require all 3 conditions to pass sequentially
-            if not (cond1_pass and cond2_pass and cond3_pass):
-                continue
-                
-            current_close = float(df_day.iloc[-1]["Close"])
-            chg_916_pct = ((close_916 - prev_close) / prev_close) * 100
+                    
             chg_span_pct = ((p_930 - close_916) / close_916) * 100
             
-            status = "✅ All 3 Conditions Fulfilled"
-                
-            results.append({
+            final_results.append({
                 "Date": target_date.strftime("%Y-%m-%d"),
                 "Symbol": clean_sym,
-                "Cond 1 (9:15 Close)": "✅ Pass" if cond1_pass else "❌ Fail",
+                "Cond 1 (9:15 Close)": "✅ Pass",
                 "Cond 2 (9:16 Breakout)": "✅ Pass" if cond2_pass else "❌ Fail",
                 "Cond 3 (9:30 Momentum)": "✅ Pass" if cond3_pass else "❌ Fail",
                 "9:16 Price (₹)": round(close_916, 2),
                 "9:30 Price (₹)": round(p_930, 2),
-                "Status": status,
-                "RawChg": chg_916_pct,
+                "Status": "🎯 Fully Verified" if (cond2_pass and cond3_pass) else "⚠️ Partial / Stopped",
+                "RawChg": item["raw_metric"],
                 "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
             })
         except Exception:
             continue
             
-    df_res = pd.DataFrame(results)
-    if not df_res.empty:
-        if category == "Top Gainers":
-            df_res = df_res.sort_values(by="RawChg", ascending=False).head(top_n)
-        else:
-            df_res = df_res.sort_values(by="RawChg", ascending=True).head(top_n)
-    return df_res
+    return pd.DataFrame(final_results)
 
 
 def run_fno_backtest_top50(from_date, to_date, category, top_n=3):
-    fno_list = TOP_50_FNO_POOL
-    all_results = []
-    
     current_date = from_date
+    all_results = []
     while current_date <= to_date:
         if current_date.weekday() < 5:
-            start_dt = datetime.combine(current_date, datetime.min.time())
-            end_dt = start_dt + timedelta(days=1)
-            
-            day_results = []
-            for symbol in fno_list:
-                clean_sym = symbol.upper().strip()
-                if clean_sym.startswith("STOCK"):
-                    continue
-                try:
-                    ticker = yf.Ticker(f"{clean_sym}.NS")
-                    df_1m = ticker.history(start=start_dt, end=end_dt, interval="1m")
-                    if df_1m.empty or len(df_1m) < 15:
-                        continue
-                    if df_1m.index.tz is not None:
-                        df_1m.index = df_1m.index.tz_localize(None)
-                        
-                    df_day = df_1m[df_1m.index.normalize() == pd.Timestamp(current_date)]
-                    if df_day.empty or len(df_day) < 2:
-                        continue
-                        
-                    t_915 = datetime.combine(current_date, dt_time(9, 15))
-                    t_916 = datetime.combine(current_date, dt_time(9, 16))
-                    t_930 = datetime.combine(current_date, dt_time(9, 30))
-                    
-                    df_day['diff_915'] = abs(df_day.index - pd.Timestamp(t_915))
-                    df_day['diff_916'] = abs(df_day.index - pd.Timestamp(t_916))
-                    df_day['diff_930'] = abs(df_day.index - pd.Timestamp(t_930))
-                    
-                    row_915 = df_day.loc[df_day['diff_915'].idxmin()]
-                    row_916 = df_day.loc[df_day['diff_916'].idxmin()]
-                    row_930 = df_day.loc[df_day['diff_930'].idxmin()]
-                    
-                    open_915 = float(row_915["Open"])
-                    close_915 = float(row_915["Close"])
-                    high_915 = float(row_915["High"])
-                    low_915 = float(row_915["Low"])
-                    
-                    close_916 = float(row_916["Close"])
-                    high_916 = float(row_916["High"])
-                    low_916 = float(row_916["Low"])
-                    p_930 = float(row_930["Close"])
-                    
-                    prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
-                    
-                    cond1_pass, cond2_pass, cond3_pass = False, False, False
-                    
-                    if category == "Top Gainers":
-                        if close_915 > prev_close and close_915 >= open_915:
-                            cond1_pass = True
-                        if cond1_pass and (close_916 > close_915 and high_916 >= high_915):
-                            cond2_pass = True
-                        if cond2_pass and (p_930 > close_916):
-                            cond3_pass = True
-                    else:
-                        if close_915 < prev_close and close_915 <= open_915:
-                            cond1_pass = True
-                        if cond1_pass and (close_916 < close_915 and low_916 <= low_915):
-                            cond2_pass = True
-                        if cond2_pass and (p_930 < close_916):
-                            cond3_pass = True
-                            
-                    if not (cond1_pass and cond2_pass and cond3_pass):
-                        continue
-                        
-                    chg_916_pct = ((close_916 - prev_close) / prev_close) * 100
-                    
-                    day_results.append({
-                        "Date": current_date.strftime("%Y-%m-%d"),
-                        "Symbol": clean_sym,
-                        "Cond 1 (9:15 Close)": "✅ Pass",
-                        "Cond 2 (9:16 Breakout)": "✅ Pass",
-                        "Cond 3 (9:30 Momentum)": "✅ Pass",
-                        "9:16 Price (₹)": round(close_916, 2),
-                        "9:30 Price (₹)": round(p_930, 2),
-                        "Status": "✅ All 3 Conditions Fulfilled",
-                        "RawChg": chg_916_pct,
-                        "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
-                    })
-                except Exception:
-                    continue
-            
-            if day_results:
-                df_day_res = pd.DataFrame(day_results)
-                if category == "Top Gainers":
-                    df_day_res = df_day_res.sort_values(by="RawChg", ascending=False).head(top_n)
-                else:
-                    df_day_res = df_day_res.sort_values(by="RawChg", ascending=True).head(top_n)
+            df_day_res = run_fno_916_analysis_top50(current_date, category, top_n)
+            if not df_day_res.empty:
                 all_results.extend(df_day_res.to_dict(orient="records"))
-                
         current_date += timedelta(days=1)
-        
     return pd.DataFrame(all_results)
 
 
@@ -1432,17 +1366,17 @@ with main_tab2:
 with main_tab_gainer_loser:
     st.subheader("⚡ F&O 9:15 to 9:30 Gainer / Loser & Backtesting Hub (Top 50 Nifty F&O Universe)")
     st.markdown(
-        "Strict 3-Condition Sequential Validation: **Condition 1 (09:15 Close)** $\rightarrow$ **Condition 2 (09:16 Breakout)** $\rightarrow$ **Condition 3 (09:30 Momentum)**."
+        "Step-by-Step Pipeline: **Step 1 (Condition 1: Top 3 selected at 9:15)** $\rightarrow$ **Step 2 (Condition 2: 9:16 Breakout Tick)** $\rightarrow$ **Step 3 (Condition 3: 9:30 Momentum Tick)**."
     )
     
     default_session_date = get_last_trading_date()
     
-    st.markdown("### 📊 Top 3 Session Summary (Sequential Condition Ticks)")
+    st.markdown("### 📊 Top 3 Session Summary (Step-by-Step Tick Pipeline)")
     top_col1, top_col2 = st.columns(2)
     with top_col1:
         top_category = st.selectbox("Select Category", ["Top Gainers", "Top Losers"], key="top_always_cat")
     with top_col2:
-        st.markdown("**Validation Rule:** All 3 conditions must pass sequentially.")
+        st.markdown("**Pipeline Rule:** Step 1 filters Top 3 $\rightarrow$ Step 2 ticks breakout $\rightarrow$ Step 3 ticks momentum.")
 
     top_cache_key = f"fno_top_50_session_{default_session_date}_{top_category}"
     if top_cache_key not in st.session_state:
@@ -1453,8 +1387,8 @@ with main_tab_gainer_loser:
     if not df_top_res.empty:
         render_native_table(df_top_res, key_prefix="fno_top_50_table")
     else:
-        st.warning("⚠️ **Fewer/Zero Stocks Notice:** Stocks appearing fewer in number or missing failed one of the sequential conditions (Cond 1 09:15 close, Cond 2 09:16 breakout, or Cond 3 09:30 follow-through).")
-        st.info("No stocks met all 3 sequential conditions for the active session.")
+        st.warning("⚠️ **Notice:** No stocks passed Step 1 (Condition 1) or subsequent steps for this session date.")
+        st.info("No stocks met the criteria for the active session.")
 
     st.markdown("---")
     
@@ -1468,7 +1402,7 @@ with main_tab_gainer_loser:
         bt_category = st.selectbox("Backtest Category", ["Top Gainers", "Top Losers"], key="fno_bt_cat")
 
     if st.button("🚀 Run F&O Date Range Backtest", type="primary", key="btn_run_fno_range_bt"):
-        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} with 3 sequential condition ticks..."):
+        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} using step-by-step condition checks..."):
             df_range_bt = run_fno_backtest_top50(bt_from_date, bt_to_date, bt_category, 3)
             st.session_state["fno_range_bt_results"] = df_range_bt
             st.success("F&O date range backtest completed successfully!")
@@ -1478,7 +1412,7 @@ with main_tab_gainer_loser:
         st.markdown(f"#### 📊 Backtest Results ({bt_from_date} to {bt_to_date})")
         render_native_table(cached_range_bt, key_prefix="fno_range_bt_table")
     else:
-        st.warning("⚠️ **Fewer Stocks Notice:** Days with fewer entries indicate candidates failed Cond 1, Cond 2, or Cond 3.")
+        st.warning("⚠️ **Notice:** Selected date range resulted in no stocks matching all steps.")
         st.info("Select date range and click 'Run F&O Date Range Backtest'.")
 
 
@@ -1541,10 +1475,10 @@ with main_tab4:
     - **Tab 📅 (Weekly Trade Strategy):** Scan higher timeframes for weekly swing breakout and swing trade setups.
     - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
     - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
-    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Sequential 3-condition validation with explicit tick marks (`Cond 1`, `Cond 2`, `Cond 3`) displayed in tables.
+    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Step-by-step pipeline where Condition 1 selects the Top 3 stocks, and Conditions 2 & 3 evaluate subsequent ticks with individual pass/fail ticks.
     - **Tab 4 (Top 1000 15m Scanner):** Instantly scan up to 1,000 NSE liquid stocks every 15 minutes using multi-threading for institutional Bollinger Band squeezes and volume expansion breakouts.
     - **Tab 5 (📌 Terminal Info & Guide):** Read terminal usage notes and instructions.
     """)
 
 st.markdown("---")
-st.markdown("📌 *Sequential 3-condition validation with explicit pass/fail tick marks for each condition is fully implemented and operational.*")
+st.markdown("📌 *Step-by-step sequential filtering pipeline (Condition 1 $\rightarrow$ Top 3 Selection $\rightarrow$ Condition 2 $\rightarrow$ Condition 3) with explicit tick marks is fully operational.*")
