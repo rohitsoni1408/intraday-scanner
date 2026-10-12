@@ -1076,40 +1076,47 @@ def run_fno_916_analysis_top50(target_date, category, top_n=3):
                 df_1m.index = df_1m.index.tz_localize(None)
                 
             df_day = df_1m[df_1m.index.normalize() == pd.Timestamp(target_date)]
-            if df_day.empty:
+            if df_day.empty or len(df_day) < 2:
                 continue
                 
             t_915 = datetime.combine(target_date, dt_time(9, 15))
+            t_916 = datetime.combine(target_date, dt_time(9, 16))
             t_930 = datetime.combine(target_date, dt_time(9, 30))
             
             df_day['diff_915'] = abs(df_day.index - pd.Timestamp(t_915))
+            df_day['diff_916'] = abs(df_day.index - pd.Timestamp(t_916))
             df_day['diff_930'] = abs(df_day.index - pd.Timestamp(t_930))
             
-            row_916 = df_day.loc[df_day['diff_915'].idxmin()]
+            row_915 = df_day.loc[df_day['diff_915'].idxmin()]
+            row_916 = df_day.loc[df_day['diff_916'].idxmin()]
             row_930 = df_day.loc[df_day['diff_930'].idxmin()]
             
-            open_915 = float(row_916["Open"])
+            open_915 = float(row_915["Open"])
+            close_915 = float(row_915["Close"])
+            high_915 = float(row_915["High"])
+            low_915 = float(row_915["Low"])
+            
             close_916 = float(row_916["Close"])
-            high_915 = float(row_916["High"])
-            low_915 = float(row_916["Low"])
+            high_916 = float(row_916["High"])
+            low_916 = float(row_916["Low"])
+            
             prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
             
-            # Slice candles between 09:16 and 09:30 to verify entry/breakout condition
-            df_sub = df_day[(df_day.index.time >= dt_time(9, 16)) & (df_day.index.time <= dt_time(9, 30))]
-            if df_sub.empty:
-                continue
-            
-            # Strict Filtering & Entry Breakout Validation:
+            # --- STRICT IMMEDIATE NEXT-CANDLE BREAKOUT ENTRY VALIDATION ---
             if category == "Top Gainers":
-                if close_916 <= prev_close or close_916 <= open_915:
+                # 1. 09:15 candle must open/close above prev close
+                if close_915 <= prev_close or close_915 <= open_915:
                     continue
-                if df_sub['High'].max() <= high_915:
-                    continue  # Subsequent candles did not go up / break above the first 1-min candle high
+                # 2. 09:16 candle MUST close higher than 09:15 close AND break above 09:15 High
+                if close_916 <= close_915 or high_916 <= high_915:
+                    continue
             else:
-                if close_916 >= prev_close or close_916 >= open_915:
+                # 1. 09:15 candle must open/close below prev close
+                if close_915 >= prev_close or close_915 >= open_915:
                     continue
-                if df_sub['Low'].min() >= low_915:
-                    continue  # Subsequent candles did not go down / break below the first 1-min candle low
+                # 2. 09:16 candle MUST close lower than 09:15 close AND break below 09:15 Low
+                if close_916 >= close_915 or low_916 >= low_915:
+                    continue
                 
             p_930 = float(row_930["Close"])
             current_close = float(df_day.iloc[-1]["Close"])
@@ -1172,37 +1179,41 @@ def run_fno_backtest_top50(from_date, to_date, category, top_n=3):
                         df_1m.index = df_1m.index.tz_localize(None)
                         
                     df_day = df_1m[df_1m.index.normalize() == pd.Timestamp(current_date)]
-                    if df_day.empty:
+                    if df_day.empty or len(df_day) < 2:
                         continue
                         
                     t_915 = datetime.combine(current_date, dt_time(9, 15))
+                    t_916 = datetime.combine(current_date, dt_time(9, 16))
                     t_930 = datetime.combine(current_date, dt_time(9, 30))
                     
                     df_day['diff_915'] = abs(df_day.index - pd.Timestamp(t_915))
+                    df_day['diff_916'] = abs(df_day.index - pd.Timestamp(t_916))
                     df_day['diff_930'] = abs(df_day.index - pd.Timestamp(t_930))
                     
-                    row_916 = df_day.loc[df_day['diff_915'].idxmin()]
+                    row_915 = df_day.loc[df_day['diff_915'].idxmin()]
+                    row_916 = df_day.loc[df_day['diff_916'].idxmin()]
                     row_930 = df_day.loc[df_day['diff_930'].idxmin()]
                     
-                    open_915 = float(row_916["Open"])
+                    open_915 = float(row_915["Open"])
+                    close_915 = float(row_915["Close"])
+                    high_915 = float(row_915["High"])
+                    low_915 = float(row_915["Low"])
+                    
                     close_916 = float(row_916["Close"])
-                    high_915 = float(row_916["High"])
-                    low_915 = float(row_916["Low"])
+                    high_916 = float(row_916["High"])
+                    low_916 = float(row_916["Low"])
+                    
                     prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
                     
-                    df_sub = df_day[(df_day.index.time >= dt_time(9, 16)) & (df_day.index.time <= dt_time(9, 30))]
-                    if df_sub.empty:
-                        continue
-                    
                     if category == "Top Gainers":
-                        if close_916 <= prev_close or close_916 <= open_915:
+                        if close_915 <= prev_close or close_915 <= open_915:
                             continue
-                        if df_sub['High'].max() <= high_915:
+                        if close_916 <= close_915 or high_916 <= high_915:
                             continue
                     else:
-                        if close_916 >= prev_close or close_916 >= open_915:
+                        if close_915 >= prev_close or close_915 >= open_915:
                             continue
-                        if df_sub['Low'].min() >= low_915:
+                        if close_916 >= close_915 or low_916 >= low_915:
                             continue
                         
                     p_930 = float(row_930["Close"])
@@ -1412,7 +1423,7 @@ with main_tab2:
 with main_tab_gainer_loser:
     st.subheader("⚡ F&O 9:15 to 9:30 Gainer / Loser & Backtesting Hub (Top 50 Nifty F&O Universe)")
     st.markdown(
-        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (strictly validating breakout beyond the first 1-min candle range between 9:16 and 9:30) and tracks momentum continuation at 9:30 AM."
+        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (strictly validating immediate 09:16 breakout above/below the 09:15 candle range) and tracks momentum continuation at 9:30 AM."
     )
     
     default_session_date = get_last_trading_date()
@@ -1434,7 +1445,7 @@ with main_tab_gainer_loser:
     if not df_top_res.empty:
         render_native_table(df_top_res, key_prefix="fno_top_50_table")
     else:
-        st.info("No stocks met the strict entry breakout criteria for the active session.")
+        st.info("No stocks met the strict immediate 09:16 breakout criteria for the active session.")
 
     st.markdown("---")
     
@@ -1449,7 +1460,7 @@ with main_tab_gainer_loser:
         bt_category = st.selectbox("Backtest Category", ["Top Gainers", "Top Losers"], key="fno_bt_cat")
 
     if st.button("🚀 Run F&O Date Range Backtest", type="primary", key="btn_run_fno_range_bt"):
-        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} (9:16 to 9:30 with breakout validation)..."):
+        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} (9:16 to 9:30 with 09:16 immediate breakout validation)..."):
             df_range_bt = run_fno_backtest_top50(bt_from_date, bt_to_date, bt_category, 3)
             st.session_state["fno_range_bt_results"] = df_range_bt
             st.success("F&O date range backtest completed successfully!")
@@ -1521,10 +1532,10 @@ with main_tab4:
     - **Tab 📅 (Weekly Trade Strategy):** Scan higher timeframes for weekly swing breakout and swing trade setups.
     - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
     - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
-    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM with strict 9:16–9:30 breakout validation and tracked for continuation at 9:30 AM.
+    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM with strict 09:16 immediate breakout validation and tracked for continuation at 9:30 AM.
     - **Tab 4 (Top 1000 15m Scanner):** Instantly scan up to 1,000 NSE liquid stocks every 15 minutes using multi-threading for institutional Bollinger Band squeezes and volume expansion breakouts.
     - **Tab 5 (📌 Terminal Info & Guide):** Read terminal usage notes and instructions.
     """)
 
 st.markdown("---")
-st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub with strict entry breakout validation, backtesting range engine, and multi-threaded scanners are fully operational.*")
+st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub with strict 09:16 immediate breakout entry validation, backtesting range engine, and multi-threaded scanners are fully operational.*")
