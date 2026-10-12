@@ -129,21 +129,17 @@ main_tab_weekly, main_tab1, main_tab2, main_tab_gainer_loser, main_tab3, main_ta
 ])
 
 
-# --- OFFICIAL TOP 100 NSE F&O MARKET CAP UNIVERSE POOL ---
+# --- OFFICIAL TOP 50 NSE F&O MARKET CAP UNIVERSE POOL ---
 @st.cache_data(ttl=86400)
-def load_top_100_fno_universe():
-    top_100_fno = [
+def load_top_50_fno_universe():
+    top_50_fno = [
         "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", "SBIN", "ITC", "HINDUNILVR",
         "LT", "BAJFINANCE", "AXISBANK", "KOTAKBANK", "MARUTI", "SUNPHARMA", "TITAN", "ULTRACEMCO", "NTPC", "ONGC",
         "POWERGRID", "ASIANPAINT", "ADANIENT", "ADANIPORTS", "COALINDIA", "TATASTEEL", "HINDALCO", "GRASIM", "TECHM", "WIPRO",
         "BAJAJFINSV", "SBILIFE", "HDFCLIFE", "DIVISLAB", "CIPLA", "EICHERMOT", "BPCL", "TATAMOTORS", "HEROMOTOCO", "BRITANNIA",
-        "INDUSINDBK", "JSWSTEEL", "APOLLOHOSP", "DRREDDY", "SHRIRAMFIN", "M&M", "NESTLEIND", "TATACONSUM", "BAJAJ-AUTO", "HCLTECH",
-        "SBICARD", "PIDILITIND", "SRF", "HAL", "BEL", "IOC", "GAIL", "ZOMATO", "JIOFIN", "TATATECH", "DLF", "TRENT", "INDIGO",
-        "AMBUJACEM", "ACC", "SIEMENS", "ABB", "HAVELLS", "VBL", "GODREJCP", "DABUR", "MARICO", "ICICIGI", "ICICIPRULI", "RECLTD", "PFC",
-        "INDUSINDBK", "LTIM", "ATGL", "ADANIGREEN", "ADANIPOWER", "PIIND", "NAVINFLUOR", "POLYCAB", "PERSISTENT", "COFORGE",
-        "MPHASIS", "CHOLAFIN", "MUTHOOTFIN", "SBICARD", "ICICIPRULI", "HDFCLIFE", "SBILIFE", "SBIN", "BANKBARODA", "PNB"
+        "INDUSINDBK", "JSWSTEEL", "APOLLOHOSP", "DRREDDY", "SHRIRAMFIN", "M&M", "NESTLEIND", "TATACONSUM", "BAJAJ-AUTO", "HCLTECH", "SBICARD"
     ]
-    return list(dict.fromkeys(top_100_fno))[:100]
+    return list(dict.fromkeys(top_50_fno))[:50]
 
 
 @st.cache_data(ttl=86400)
@@ -204,7 +200,7 @@ def load_nifty_market_cap_universe():
 
 
 NIFTY_1000_POOL = load_nifty_market_cap_universe()
-TOP_100_FNO_POOL = load_top_100_fno_universe()
+TOP_50_FNO_POOL = load_top_50_fno_universe()
 
 SMALL_CAP_IPO_FALLBACK_POOL = [
     "ZOMATO", "PAYTM", "NYKAA", "POLICYBZR", "DELHIVERY", "JIOFIN", "TATATECH",
@@ -1060,8 +1056,8 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
     return df_res
 
 
-def run_fno_915_analysis(target_date, category, top_n, target_time_sel):
-    fno_list = TOP_100_FNO_POOL
+def run_fno_916_analysis_top50(target_date, category, top_n=3):
+    fno_list = TOP_50_FNO_POOL
     results = []
     
     start_dt = datetime.combine(target_date, datetime.min.time())
@@ -1074,7 +1070,7 @@ def run_fno_915_analysis(target_date, category, top_n, target_time_sel):
         try:
             ticker = yf.Ticker(f"{clean_sym}.NS")
             df_1m = ticker.history(start=start_dt, end=end_dt, interval="1m")
-            if df_1m.empty or len(df_1m) < 5:
+            if df_1m.empty or len(df_1m) < 15:
                 continue
             if df_1m.index.tz is not None:
                 df_1m.index = df_1m.index.tz_localize(None)
@@ -1084,41 +1080,46 @@ def run_fno_915_analysis(target_date, category, top_n, target_time_sel):
                 continue
                 
             t_915 = datetime.combine(target_date, dt_time(9, 15))
-            t_target = datetime.combine(target_date, target_time_sel)
+            t_930 = datetime.combine(target_date, dt_time(9, 30))
             
             df_day['diff_915'] = abs(df_day.index - pd.Timestamp(t_915))
-            df_day['diff_target'] = abs(df_day.index - pd.Timestamp(t_target))
+            df_day['diff_930'] = abs(df_day.index - pd.Timestamp(t_930))
             
-            row_915 = df_day.loc[df_day['diff_915'].idxmin()]
-            row_target = df_day.loc[df_day['diff_target'].idxmin()]
+            row_916 = df_day.loc[df_day['diff_915'].idxmin()]
+            row_930 = df_day.loc[df_day['diff_930'].idxmin()]
             
-            p_915 = float(row_915["Open"])  # 9:15 open/initial price
-            p_target = float(row_target["Close"])
-            actual_target_time = row_target.name.time().strftime("%H:%M")
+            open_915 = float(row_916["Open"])
+            close_916 = float(row_916["Close"])
+            
+            if category == "Top Gainers" and close_916 <= open_915:
+                continue
+            if category == "Top Losers" and close_916 >= open_915:
+                continue
+                
+            p_930 = float(row_930["Close"])
             current_close = float(df_day.iloc[-1]["Close"])
             
-            prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else p_915
-            chg_915_pct = ((p_915 - prev_close) / prev_close) * 100
-            chg_915_target_pct = ((p_target - p_915) / p_915) * 100
+            prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
+            chg_916_pct = ((close_916 - prev_close) / prev_close) * 100
+            chg_span_pct = ((p_930 - close_916) / close_916) * 100
             
             if category == "Top Gainers":
-                is_continued = p_target > p_915
-                continuation_status = f"✅ Continue Gainer (at {actual_target_time})" if is_continued else "❌ Reversed / Dropped"
+                is_continued = p_930 > close_916
+                status = f"✅ Continued Up (at 09:30)" if is_continued else "❌ Reversed / Dropped"
             else:
-                is_continued = p_target < p_915
-                continuation_status = f"✅ Continue Loser (at {actual_target_time})" if is_continued else "❌ Reversed / Recovered"
+                is_continued = p_930 < close_916
+                status = f"✅ Continued Down (at 09:30)" if is_continued else "❌ Reversed / Recovered"
                 
             results.append({
                 "Date": target_date.strftime("%Y-%m-%d"),
                 "Symbol": clean_sym,
-                "9:15 Price (₹)": round(p_915, 2),
-                f"{actual_target_time} Price (₹)": round(p_target, 2),
-                "Current / Last Close (₹)": round(current_close, 2),
-                "9:15 to Target Change (%)": f"{chg_915_target_pct:+.2f}%",
-                "Continuation Status": continuation_status,
-                "RawChg": chg_915_pct,
-                "RawDelta": chg_915_target_pct,
-                "DataFrame1m": df_day,
+                "9:16 Price (₹)": round(close_916, 2),
+                "9:30 Price (₹)": round(p_930, 2),
+                "Current / Close (₹)": round(current_close, 2),
+                "9:16 to 9:30 Change (%)": f"{chg_span_pct:+.2f}%",
+                "Continuation Status": status,
+                "RawChg": chg_916_pct,
+                "RawDelta": chg_span_pct,
                 "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
             })
         except Exception:
@@ -1133,8 +1134,8 @@ def run_fno_915_analysis(target_date, category, top_n, target_time_sel):
     return df_res
 
 
-def run_fno_backtest_range(from_date, to_date, from_time, to_time, category, top_n):
-    fno_list = TOP_100_FNO_POOL
+def run_fno_backtest_top50(from_date, to_date, category, top_n=3):
+    fno_list = TOP_50_FNO_POOL
     all_results = []
     
     current_date = from_date
@@ -1151,7 +1152,7 @@ def run_fno_backtest_range(from_date, to_date, from_time, to_time, category, top
                 try:
                     ticker = yf.Ticker(f"{clean_sym}.NS")
                     df_1m = ticker.history(start=start_dt, end=end_dt, interval="1m")
-                    if df_1m.empty or len(df_1m) < 5:
+                    if df_1m.empty or len(df_1m) < 15:
                         continue
                     if df_1m.index.tz is not None:
                         df_1m.index = df_1m.index.tz_localize(None)
@@ -1160,42 +1161,47 @@ def run_fno_backtest_range(from_date, to_date, from_time, to_time, category, top
                     if df_day.empty:
                         continue
                         
-                    t_from = datetime.combine(current_date, from_time)
-                    t_to = datetime.combine(current_date, to_time)
+                    t_915 = datetime.combine(current_date, dt_time(9, 15))
+                    t_930 = datetime.combine(current_date, dt_time(9, 30))
                     
-                    df_day['diff_from'] = abs(df_day.index - pd.Timestamp(t_from))
-                    df_day['diff_to'] = abs(df_day.index - pd.Timestamp(t_to))
+                    df_day['diff_915'] = abs(df_day.index - pd.Timestamp(t_915))
+                    df_day['diff_930'] = abs(df_day.index - pd.Timestamp(t_930))
                     
-                    row_from = df_day.loc[df_day['diff_from'].idxmin()]
-                    row_to = df_day.loc[df_day['diff_to'].idxmin()]
+                    row_916 = df_day.loc[df_day['diff_915'].idxmin()]
+                    row_930 = df_day.loc[df_day['diff_930'].idxmin()]
                     
-                    p_from = float(row_from["Open"]) if from_time == dt_time(9, 15) else float(row_from["Close"])
-                    p_to = float(row_to["Close"])
-                    actual_to_time = row_to.name.time().strftime("%H:%M")
+                    open_915 = float(row_916["Open"])
+                    close_916 = float(row_916["Close"])
+                    
+                    if category == "Top Gainers" and close_916 <= open_915:
+                        continue
+                    if category == "Top Losers" and close_916 >= open_915:
+                        continue
+                        
+                    p_930 = float(row_930["Close"])
                     current_close = float(df_day.iloc[-1]["Close"])
                     
-                    prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else p_from
-                    chg_from_pct = ((p_from - prev_close) / prev_close) * 100
-                    chg_span_pct = ((p_to - p_from) / p_from) * 100
+                    prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
+                    chg_916_pct = ((close_916 - prev_close) / prev_close) * 100
+                    chg_span_pct = ((p_930 - close_916) / close_916) * 100
                     
                     if category == "Top Gainers":
-                        is_continued = p_to > p_from
-                        status = f"✅ Continue Gainer (at {actual_to_time})" if is_continued else "❌ Reversed / Dropped"
+                        is_continued = p_930 > close_916
+                        status = f"✅ Continued Up (at 09:30)" if is_continued else "❌ Reversed / Dropped"
                     else:
-                        is_continued = p_to < p_from
-                        status = f"✅ Continue Loser (at {actual_to_time})" if is_continued else "❌ Reversed / Recovered"
+                        is_continued = p_930 < close_916
+                        status = f"✅ Continued Down (at 09:30)" if is_continued else "❌ Reversed / Recovered"
                         
                     day_results.append({
                         "Date": current_date.strftime("%Y-%m-%d"),
                         "Symbol": clean_sym,
-                        f"From ({from_time.strftime('%H:%M')}) (₹)": round(p_from, 2),
-                        f"To ({actual_to_time}) (₹)": round(p_to, 2),
-                        "Current / Last Close (₹)": round(current_close, 2),
-                        "Change (%)": f"{chg_span_pct:+.2f}%",
+                        "9:16 Price (₹)": round(close_916, 2),
+                        "9:30 Price (₹)": round(p_930, 2),
+                        "Current / Close (₹)": round(current_close, 2),
+                        "9:16 to 9:30 Change (%)": f"{chg_span_pct:+.2f}%",
                         "Status": status,
-                        "RawChg": chg_from_pct,
+                        "RawChg": chg_916_pct,
                         "RawDelta": chg_span_pct,
-                        "DataFrame1m": df_day,
                         "Chart": f"https://www.tradingview.com/chart/?symbol=NSE:{clean_sym}"
                     })
                 except Exception:
@@ -1376,96 +1382,58 @@ with main_tab2:
         st.info("Select date, time filter, direction option, and click the button above to run backtesting.")
 
 
-# --- NEW TAB: F&O 9:15 GAINER/LOSER & RANGE BACKTESTING HUB (TOP 100 F&O MARKET CAP) ---
+# --- UPDATED TAB: F&O 9:15 GAINER/LOSER & RANGE BACKTESTING HUB (TOP 50 NIFTY F&O UNIVERSE) ---
 with main_tab_gainer_loser:
-    st.subheader("⚡ F&O 9:15 to 9:30 Gainer / Loser & Backtesting Hub (Top 100 F&O Market Cap Universe)")
+    st.subheader("⚡ F&O 9:15 to 9:30 Gainer / Loser & Backtesting Hub (Top 50 Nifty F&O Universe)")
     st.markdown(
-        "Always visible at the top are the **Top 3 Gainers** and **Top 3 Losers** for the live or last active trading session (**Top 100 F&O stocks by market cap**) from **9:15 AM to 9:30 AM**. Below this section, you can configure historical date and time ranges for custom backtesting (strictly outputting Top 3 Gainers and Top 3 Losers per date)."
+        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (filtering for first 1-minute candle confirmation) and tracks momentum continuation at 9:30 AM."
     )
     
     default_session_date = get_last_trading_date()
     
-    # --- ALWAYS VISIBLE TOP SECTION: LIVE / LAST TRADING SESSION (9:15 to 9:30) ---
-    st.markdown("### 📊 Top 3 Session Summary (Always Visible)")
+    # --- LIVE / LAST ACTIVE SESSION SUMMARY (9:16 to 9:30) ---
+    st.markdown("### 📊 Top 3 Session Summary (9:16 Detection & 9:30 Result)")
     top_col1, top_col2 = st.columns(2)
     with top_col1:
-        top_target_time = st.time_input("Comparison Time", value=dt_time(9, 30), step=300, key="top_always_time")
+        top_category = st.selectbox("Select Category", ["Top Gainers", "Top Losers"], key="top_always_cat")
     with top_col2:
-        st.markdown("**Display Mode:** Exactly Top 3 Gainers & Top 3 Losers")
+        st.markdown("**Fixed Window:** 9:16 Initial Detection -> 9:30 Result (Top 3)")
 
-    top_cache_key_gainers = f"fno_top_always_gainers_915_{default_session_date}_{top_target_time}"
-    top_cache_key_losers = f"fno_top_always_losers_915_{default_session_date}_{top_target_time}"
+    top_cache_key = f"fno_top_50_session_{default_session_date}_{top_category}"
+    if top_cache_key not in st.session_state:
+        with st.spinner(f"Analyzing Top 50 F&O stocks for {default_session_date}..."):
+            st.session_state[top_cache_key] = run_fno_916_analysis_top50(default_session_date, top_category, 3)
 
-    if top_cache_key_gainers not in st.session_state or top_cache_key_losers not in st.session_state:
-        with st.spinner(f"Fetching Top 3 Gainers & Top 3 Losers from 9:15 to {top_target_time.strftime('%H:%M')} on {default_session_date}..."):
-            st.session_state[top_cache_key_gainers] = run_fno_915_analysis(default_session_date, "Top Gainers", 3, top_target_time)
-            st.session_state[top_cache_key_losers] = run_fno_915_analysis(default_session_date, "Top Losers", 3, top_target_time)
-
-    df_top_gainers = st.session_state.get(top_cache_key_gainers, pd.DataFrame())
-    df_top_losers = st.session_state.get(top_cache_key_losers, pd.DataFrame())
-
-    st.markdown("#### 🟢 Top 3 Gainers")
-    render_native_table(df_top_gainers, key_prefix="fno_top_gainers_table")
-
-    st.markdown("#### 🔴 Top 3 Losers")
-    render_native_table(df_top_losers, key_prefix="fno_top_losers_table")
-
-    all_current_symbols = list(dict.fromkeys(df_top_gainers["Symbol"].tolist() + df_top_losers["Symbol"].tolist()))
-    if all_current_symbols:
-        st.markdown("#### 📉 1-Minute Chart Inspector (Current Session)")
-        selected_stock_top = st.selectbox(
-            "Select Stock Symbol to View 1-Min Chart:",
-            options=all_current_symbols,
-            key="fno_top_stock_select"
-        )
-        selected_top_row = pd.concat([df_top_gainers, df_top_losers]).query("Symbol == @selected_stock_top")
-        if not selected_top_row.empty:
-            df_1m_top = selected_top_row.iloc[0]["DataFrame1m"]
-            if not df_1m_top.empty and "Close" in df_1m_top.columns:
-                st.markdown(f"**1-Min Price Action Chart for {selected_stock_top} on {default_session_date}**")
-                st.line_chart(df_1m_top["Close"])
+    df_top_res = st.session_state.get(top_cache_key, pd.DataFrame())
+    if not df_top_res.empty:
+        render_native_table(df_top_res, key_prefix="fno_top_50_table")
+    else:
+        st.info("No stocks met the criteria for the active session.")
 
     st.markdown("---")
     
-    # --- HISTORICAL BACKTESTING OPTIONS SECTION ---
-    st.markdown("### 🔬 Historical Backtesting Options (Top 3 Gainers & Top 3 Losers per Date)")
-    bt_col1, bt_col2, bt_col3, bt_col4, bt_col5 = st.columns(5)
+    # --- HISTORICAL BACKTESTING OPTIONS SECTION (DATE RANGE ONLY) ---
+    st.markdown("### 🔬 Historical Backtesting (Date Range)")
+    bt_col1, bt_col2, bt_col3 = st.columns(3)
     with bt_col1:
         bt_from_date = st.date_input("From Date", value=default_session_date - timedelta(days=5), key="fno_bt_from_date")
     with bt_col2:
         bt_to_date = st.date_input("To Date", value=default_session_date, key="fno_bt_to_date")
     with bt_col3:
-        bt_from_time = st.time_input("From Time", value=dt_time(9, 15), step=300, key="fno_bt_from_time")
-    with bt_col4:
-        bt_to_time = st.time_input("To Time", value=dt_time(9, 30), step=300, key="fno_bt_to_time")
-    with bt_col5:
         bt_category = st.selectbox("Backtest Category", ["Top Gainers", "Top Losers"], key="fno_bt_cat")
 
-    if st.button("🚀 Run F&O Range Backtest", type="primary", key="btn_run_fno_range_bt"):
-        with st.spinner(f"Backtesting Top 3 {bt_category} per date from {bt_from_date} to {bt_to_date} ({bt_from_time.strftime('%H:%M')} to {bt_to_time.strftime('%H:%M')})..."):
-            df_range_bt = run_fno_backtest_range(bt_from_date, bt_to_date, bt_from_time, bt_to_time, bt_category, 3)
+    if st.button("🚀 Run F&O Date Range Backtest", type="primary", key="btn_run_fno_range_bt"):
+        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} (9:16 to 9:30)..."):
+            df_range_bt = run_fno_backtest_top50(bt_from_date, bt_to_date, bt_category, 3)
             st.session_state["fno_range_bt_results"] = df_range_bt
-            st.success("F&O range backtest completed successfully!")
+            st.success("F&O date range backtest completed successfully!")
 
     cached_range_bt = st.session_state.get("fno_range_bt_results", pd.DataFrame())
     if not cached_range_bt.empty:
         st.markdown(f"#### 📊 Backtest Results ({bt_from_date} to {bt_to_date})")
         render_native_table(cached_range_bt, key_prefix="fno_range_bt_table")
-        
-        st.markdown("#### 📉 Backtest 1-Minute Chart Inspector")
-        selected_bt_stock = st.selectbox(
-            "Select Backtest Stock Symbol to View 1-Min Chart:",
-            options=cached_range_bt["Symbol"].unique().tolist(),
-            key="fno_range_bt_stock_select"
-        )
-        selected_bt_row = cached_range_bt[cached_range_bt["Symbol"] == selected_bt_stock]
-        if not selected_bt_row.empty:
-            df_1m_bt = selected_bt_row.iloc[0]["DataFrame1m"]
-            if not df_1m_bt.empty and "Close" in df_1m_bt.columns:
-                st.markdown(f"**1-Min Price Action Chart for {selected_bt_stock}**")
-                st.line_chart(df_1m_bt["Close"])
     else:
-        st.info("Configure your backtest date/time range above and click 'Run F&O Range Backtest'.")
+        st.info("Select date range and click 'Run F&O Date Range Backtest'.")
 
 
 # --- TAB 3: TOP 1000 15m SCANNER HUB ---
@@ -1527,10 +1495,10 @@ with main_tab4:
     - **Tab 📅 (Weekly Trade Strategy):** Scan higher timeframes for weekly swing breakout and swing trade setups.
     - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
     - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
-    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Always displays the Top 3 Gainers and Top 3 Losers at the top for the active session (capturing at 9:15 AM), followed below by custom historical range backtesting (outputting strictly Top 3 gainers/losers per date).
+    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM (with first 1-min candle direction filter) and tracked for continuation at 9:30 AM.
     - **Tab 4 (Top 1000 15m Scanner):** Instantly scan up to 1,000 NSE liquid stocks every 15 minutes using multi-threading for institutional Bollinger Band squeezes and volume expansion breakouts.
     - **Tab 5 (📌 Terminal Info & Guide):** Read terminal usage notes and instructions.
     """)
 
 st.markdown("---")
-st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 100 F&O session summary (Top 3 Gainers & Top 3 Losers starting from 9:15 AM), backtesting range engine, multi-threaded scanners, and chart inspectors are fully operational.*")
+st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub, backtesting range engine, multi-threaded scanners, and chart inspectors are fully operational.*")
