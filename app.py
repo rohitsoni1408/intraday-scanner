@@ -1090,16 +1090,19 @@ def run_fno_916_analysis_top50(target_date, category, top_n=3):
             
             open_915 = float(row_916["Open"])
             close_916 = float(row_916["Close"])
+            prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
             
-            if category == "Top Gainers" and close_916 <= open_915:
-                continue
-            if category == "Top Losers" and close_916 >= open_915:
-                continue
+            # Strict Filtering: Top Gainer must be > Prev Close and Green 1-min candle; Top Loser must be < Prev Close and Red 1-min candle
+            if category == "Top Gainers":
+                if close_916 <= prev_close or close_916 <= open_915:
+                    continue
+            else:
+                if close_916 >= prev_close or close_916 >= open_915:
+                    continue
                 
             p_930 = float(row_930["Close"])
             current_close = float(df_day.iloc[-1]["Close"])
             
-            prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
             chg_916_pct = ((close_916 - prev_close) / prev_close) * 100
             chg_span_pct = ((p_930 - close_916) / close_916) * 100
             
@@ -1172,16 +1175,18 @@ def run_fno_backtest_top50(from_date, to_date, category, top_n=3):
                     
                     open_915 = float(row_916["Open"])
                     close_916 = float(row_916["Close"])
+                    prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
                     
-                    if category == "Top Gainers" and close_916 <= open_915:
-                        continue
-                    if category == "Top Losers" and close_916 >= open_915:
-                        continue
+                    if category == "Top Gainers":
+                        if close_916 <= prev_close or close_916 <= open_915:
+                            continue
+                    else:
+                        if close_916 >= prev_close or close_916 >= open_915:
+                            continue
                         
                     p_930 = float(row_930["Close"])
                     current_close = float(df_day.iloc[-1]["Close"])
                     
-                    prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
                     chg_916_pct = ((close_916 - prev_close) / prev_close) * 100
                     chg_span_pct = ((p_930 - close_916) / close_916) * 100
                     
@@ -1386,7 +1391,7 @@ with main_tab2:
 with main_tab_gainer_loser:
     st.subheader("⚡ F&O 9:15 to 9:30 Gainer / Loser & Backtesting Hub (Top 50 Nifty F&O Universe)")
     st.markdown(
-        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (filtering for first 1-minute candle confirmation) and tracks momentum continuation at 9:30 AM."
+        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (strictly filtering for green/red first 1-minute candle relative to previous close) and tracks momentum continuation at 9:30 AM."
     )
     
     default_session_date = get_last_trading_date()
@@ -1495,10 +1500,10 @@ with main_tab4:
     - **Tab 📅 (Weekly Trade Strategy):** Scan higher timeframes for weekly swing breakout and swing trade setups.
     - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
     - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
-    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM (with first 1-min candle direction filter) and tracked for continuation at 9:30 AM.
+    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM (with strict previous close & first 1-min candle filters) and tracked for continuation at 9:30 AM.
     - **Tab 4 (Top 1000 15m Scanner):** Instantly scan up to 1,000 NSE liquid stocks every 15 minutes using multi-threading for institutional Bollinger Band squeezes and volume expansion breakouts.
     - **Tab 5 (📌 Terminal Info & Guide):** Read terminal usage notes and instructions.
     """)
 
 st.markdown("---")
-st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub, backtesting range engine, multi-threaded scanners, and chart inspectors are fully operational.*")
+st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub with strict filtering, backtesting range engine, multi-threaded scanners, and chart inspectors are fully operational.*")
