@@ -957,7 +957,7 @@ def run_live_backtest(target_date, scan_clause, top_n_count, universe_pool, back
                     "Signal": "BUY" if candle_close >= candle_open else "SELL",
                     "Win Probability (%)": "0.0%",
                     "Entry Time Checked": candle_time.strftime("%H:%M"),
-                    "Entry Status": "❌ Entry Not Allowed (Low Vol/Criteria Unmet)",
+                    "Entry Status": "❌ Entry Not Allowed (Low Volume or Criteria Unmet)",
                     "Tight Entry (₹)": f"₹{entry_price}",
                     "Small SL (₹)": f"₹{sl}",
                     "Target 1 (₹)": f"₹{t1}",
@@ -1102,21 +1102,17 @@ def run_fno_916_analysis_top50(target_date, category, top_n=3):
             
             prev_close = float(ticker.fast_info.previous_close) if ticker.fast_info.previous_close else open_915
             
-            # --- STRICT IMMEDIATE NEXT-CANDLE BREAKOUT ENTRY VALIDATION ---
+            # --- STRICT CONDITION CHECK WITH REJECTION REASON INDICATION ---
             if category == "Top Gainers":
-                # 1. 09:15 candle must open/close above prev close
                 if close_915 <= prev_close or close_915 <= open_915:
-                    continue
-                # 2. 09:16 candle MUST close higher than 09:15 close AND break above 09:15 High
+                    continue  # Filtered out: 9:15 candle was not bullish/above previous close
                 if close_916 <= close_915 or high_916 <= high_915:
-                    continue
+                    continue  # Filtered out: 9:16 candle failed to break above 09:15 high / reversed down
             else:
-                # 1. 09:15 candle must open/close below prev close
                 if close_915 >= prev_close or close_915 >= open_915:
-                    continue
-                # 2. 09:16 candle MUST close lower than 09:15 close AND break below 09:15 Low
+                    continue  # Filtered out: 9:15 candle was not bearish/below previous close
                 if close_916 >= close_915 or low_916 >= low_915:
-                    continue
+                    continue  # Filtered out: 9:16 candle failed to break below 09:15 low / recovered up
                 
             p_930 = float(row_930["Close"])
             current_close = float(df_day.iloc[-1]["Close"])
@@ -1423,7 +1419,7 @@ with main_tab2:
 with main_tab_gainer_loser:
     st.subheader("⚡ F&O 9:15 to 9:30 Gainer / Loser & Backtesting Hub (Top 50 Nifty F&O Universe)")
     st.markdown(
-        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (strictly validating immediate 09:16 breakout above/below the 09:15 candle range) and tracks momentum continuation at 9:30 AM."
+        "Detects Top 3 Gainers and Top 3 Losers at 9:16 AM (strictly validating that the 09:15 candle meets trend criteria AND the 09:16 candle immediately breaks out) and tracks momentum continuation at 9:30 AM."
     )
     
     default_session_date = get_last_trading_date()
@@ -1445,7 +1441,8 @@ with main_tab_gainer_loser:
     if not df_top_res.empty:
         render_native_table(df_top_res, key_prefix="fno_top_50_table")
     else:
-        st.info("No stocks met the strict immediate 09:16 breakout criteria for the active session.")
+        st.warning("⚠️ **Fewer/Zero Stocks Displayed Notice:** On this session date, stocks that initially opened with a gap/spike failed to satisfy the strict secondary filter (either the 09:15 candle was not aligned with the previous close, or the 09:16 candle immediately reversed/failed to break the 09:15 range). Only stocks passing both strict conditions are shown.")
+        st.info("No stocks met the strict criteria for the active session.")
 
     st.markdown("---")
     
@@ -1455,87 +1452,4 @@ with main_tab_gainer_loser:
     with bt_col1:
         bt_from_date = st.date_input("From Date", value=default_session_date - timedelta(days=5), key="fno_bt_from_date")
     with bt_col2:
-        bt_to_date = st.date_input("To Date", value=default_session_date, key="fno_bt_to_date")
-    with bt_col3:
-        bt_category = st.selectbox("Backtest Category", ["Top Gainers", "Top Losers"], key="fno_bt_cat")
-
-    if st.button("🚀 Run F&O Date Range Backtest", type="primary", key="btn_run_fno_range_bt"):
-        with st.spinner(f"Backtesting Top 3 {bt_category} from {bt_from_date} to {bt_to_date} (9:16 to 9:30 with 09:16 immediate breakout validation)..."):
-            df_range_bt = run_fno_backtest_top50(bt_from_date, bt_to_date, bt_category, 3)
-            st.session_state["fno_range_bt_results"] = df_range_bt
-            st.success("F&O date range backtest completed successfully!")
-
-    cached_range_bt = st.session_state.get("fno_range_bt_results", pd.DataFrame())
-    if not cached_range_bt.empty:
-        st.markdown(f"#### 📊 Backtest Results ({bt_from_date} to {bt_to_date})")
-        render_native_table(cached_range_bt, key_prefix="fno_range_bt_table")
-    else:
-        st.info("Select date range and click 'Run F&O Date Range Backtest'.")
-
-
-# --- TAB 3: TOP 1000 15m SCANNER HUB ---
-with main_tab3:
-    st.subheader("⚡ Top 1000 15-Minute Institutional Breakout Scanner")
-    st.markdown(
-        "Runs a multi-threaded concurrent scan across up to 1,000 NSE symbols on the **15-minute timeframe**, filtering for **Moving Average Alignment (EMA 20 > 50 > 200)**, **Bollinger Band Squeezes**, **Volume Surge Spikes (>=2.5x)**, and **RSI Momentum Resets**."
-    )
-    
-    col_t1000_1, col_t1000_2 = st.columns(2)
-    with col_t1000_1:
-        max_threads = st.slider("Concurrent Thread Pool Size:", min_value=5, max_value=40, value=20, step=5)
-    with col_t1000_2:
-        universe_scan_limit = st.selectbox(
-            "Universe Size for 15m Scan:",
-            options=[100, 250, 500, 750, 1000],
-            index=4,
-        )
-
-    if st.button("🚀 Run Top 1000 15-Minute Breakout Scan", type="primary", use_container_width=True):
-        universe_to_scan = [f"{sym}.NS" for sym in NIFTY_1000_POOL[:universe_scan_limit] if not sym.startswith("STOCK")]
-        
-        with st.spinner(f"Scanning {len(universe_to_scan)} symbols concurrently with {max_threads} threads on 15m candles..."):
-            start_time = time.time()
-            matches = []
-
-            with ThreadPoolExecutor(max_workers=max_threads) as executor:
-                futures = {executor.submit(scan_single_stock_top1000, ticker): ticker for ticker in universe_to_scan}
-                for future in as_completed(futures):
-                    res = future.result()
-                    if res:
-                        matches.append(res)
-
-            elapsed = time.time() - start_time
-            df_top1000_res = pd.DataFrame(matches)
-            if not df_top1000_res.empty:
-                df_top1000_res = df_top1000_res.sort_values(by=["RawProfit", "RSI"], ascending=False)
-            
-            st.session_state["top1000_scan_results"] = (df_top1000_res, elapsed)
-            st.success(f"Scan completed in {elapsed:.2f} seconds. Found {len(matches)} matching setup(s)!")
-
-    cached_1000_res = st.session_state.get("top1000_scan_results", None)
-    if cached_1000_res is not None:
-        df_res, elapsed_time = cached_1000_res
-        st.markdown(f"**Last Scan Runtime:** {elapsed_time:.2f} seconds | **Setups Detected:** {len(df_res)}")
-        st.markdown("---")
-        if not df_res.empty:
-            render_native_table(df_res, key_prefix="top1000_scanner_table")
-        else:
-            st.info("No stocks met the strict 15-minute squeeze & volume expansion criteria during this check window.")
-    else:
-        st.info("Click the button above to initiate the concurrent top 1000 15-minute breakout scan.")
-
-
-# --- TAB 4: TERMINAL INFO & GUIDE ---
-with main_tab4:
-    st.subheader("📌 Terminal Guidelines & Summary")
-    st.markdown("""
-    - **Tab 📅 (Weekly Trade Strategy):** Scan higher timeframes for weekly swing breakout and swing trade setups.
-    - **Tab 1 (Intraday Strategies Hub):** Choose between the **Combined Intraday Engine**, **15m VMA Strategy**, or the **High-Turnover & Small-Cap / IPO Momentum Surge Strategy**.
-    - **Tab 2 (Intraday Backtester Hub):** Simulate intraday entries on historical dates and specific times across the universe.
-    - **Tab 3 (⚡ F&O 9:15-9:30 Gainer/Loser Hub):** Top 50 Nifty F&O stocks analyzed at 9:16 AM with strict 09:16 immediate breakout validation and tracked for continuation at 9:30 AM.
-    - **Tab 4 (Top 1000 15m Scanner):** Instantly scan up to 1,000 NSE liquid stocks every 15 minutes using multi-threading for institutional Bollinger Band squeezes and volume expansion breakouts.
-    - **Tab 5 (📌 Terminal Info & Guide):** Read terminal usage notes and instructions.
-    """)
-
-st.markdown("---")
-st.markdown("📌 *Weekly strategy, intraday institutional strategies, Top 50 F&O 9:15-9:30 session hub with strict 09:16 immediate breakout entry validation, backtesting range engine, and multi-threaded scanners are fully operational.*")
+        bt_to_
